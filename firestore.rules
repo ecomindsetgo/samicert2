@@ -18,73 +18,71 @@ service cloud.firestore {
         );
     }
 
-    // Mesa de Partes: firma (Firma ONPE) y culmina la certificación con el
-    // SHA-256 definitivo. Se identifica por correo porque, a diferencia de
-    // los certificadores, aún no se conoce su UID hasta crear la cuenta.
     function esMesaPartes() {
       return request.auth != null &&
         request.auth.token.email == "archivocsjsanta@pj.gob.pe";
     }
 
     match /usuarios/{uid} {
-      allow read: if esAdministrador() || ((esCertificador() || esMesaPartes()) && request.auth.uid == uid);
+      allow read: if esAdministrador() ||
+        (esCertificador() && request.auth.uid == uid) ||
+        (esMesaPartes() && request.auth.uid == uid);
 
       allow create: if
         (esAdministrador() && request.auth.uid == uid) ||
-        ((esCertificador() || esMesaPartes()) && request.auth.uid == uid);
+        (esCertificador() && request.auth.uid == uid) ||
+        (esMesaPartes() && request.auth.uid == uid);
 
       allow update: if
         (esAdministrador() && request.auth.uid == uid) ||
-        ((esCertificador() || esMesaPartes()) && request.auth.uid == uid);
+        (esCertificador() && request.auth.uid == uid) ||
+        (esMesaPartes() && request.auth.uid == uid);
 
       allow delete: if false;
     }
 
-    // Documentos ya sellados por un certificador (carátula + sello) y a la
-    // espera de que Mesa de Partes los firme (Firma ONPE) y culmine la
-    // certificación con el SHA-256 definitivo. No tienen SHA final: se crean
-    // en el paso 1 y se eliminan al completarse el paso 2 en /certificaciones.
-    match /pendientesFirma/{certificacionId} {
-
-      allow get: if esAdministrador() || esCertificador() || esMesaPartes();
-      allow list: if esAdministrador() || esCertificador() || esMesaPartes();
+    // Bandeja de documentos generados por los certificadores y pendientes de firma.
+    match /pendientesFirma/{pendienteId} {
+      allow read: if esAdministrador() || esCertificador() || esMesaPartes();
 
       allow create: if esCertificador()
-        && request.resource.data.certificadorUid == request.auth.uid;
+        && request.resource.data.certificadorUid == request.auth.uid
+        && request.resource.data.estado == "pendiente-firma";
 
-      allow update: if false;
-      allow delete: if esAdministrador() || esMesaPartes()
-        || (esCertificador() && resource.data.certificadorUid == request.auth.uid);
+      allow update: if esMesaPartes()
+        && resource.data.estado == "pendiente-firma"
+        && request.resource.data.estado == "pendiente-firma";
+
+      allow delete: if esAdministrador() || esMesaPartes();
 
       match /pdfChunks/{chunkId} {
         allow read: if esAdministrador() || esCertificador() || esMesaPartes();
         allow create: if esCertificador();
         allow update: if false;
-        allow delete: if esAdministrador() || esMesaPartes() || esCertificador();
+        allow delete: if esAdministrador() || esMesaPartes();
       }
     }
 
     match /certificaciones/{certificacionId} {
-
       allow get: if true;
       allow list: if esAdministrador() || esCertificador() || esMesaPartes();
 
-      // El registro definitivo lo crea quien firma y culmina con el SHA:
-      // hoy, Mesa de Partes. Se conserva la ruta antigua (el propio
-      // certificador crea y firma) por si se necesita en algún caso puntual.
-      allow create: if
-        (esMesaPartes() && request.resource.data.firmanteUid == request.auth.uid) ||
-        (esCertificador() && request.resource.data.certificadorUid == request.auth.uid);
+      // El certificador ya no crea la certificación definitiva.
+      // Mesa de Partes la crea después de verificar el PDF firmado.
+      allow create: if esMesaPartes()
+        && request.resource.data.certificadorUid ==
+          get(/databases/$(database)/documents/pendientesFirma/$(certificacionId)).data.certificadorUid
+        && request.resource.data.firmanteUid == request.auth.uid
+        && request.resource.data.estado == "certificado";
 
       allow update: if false;
       allow delete: if esAdministrador();
 
-      // Trozos en base64 del PDF certificado (archivado sin Firebase Storage).
       match /pdfChunks/{chunkId} {
         allow read: if esAdministrador() || esCertificador() || esMesaPartes();
-        allow create: if esCertificador() || esMesaPartes();
+        allow create: if esMesaPartes();
         allow update: if false;
-        allow delete: if esAdministrador() || esCertificador() || esMesaPartes();
+        allow delete: if esAdministrador() || esMesaPartes();
       }
     }
 
