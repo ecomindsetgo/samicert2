@@ -6,6 +6,7 @@
   --green:#16823a;
   --purple:#5b2bb8;
   --orange:#ea4f0a;
+  --teal:#0f8b8d;
   --ink:#142235;
   --muted:#64748b;
   --line:#e4e9ef;
@@ -232,6 +233,7 @@ button{cursor:pointer}
 .card-blue .card-icon{background:#eaf2ff;color:var(--blue)}
 .card-purple .card-icon{background:#f0ebff;color:var(--purple)}
 .card-orange .card-icon{background:#fff0e8;color:var(--orange)}
+.card-teal .card-icon{background:#e6f6f6;color:var(--teal)}
 .home-card h3{margin:0 0 8px;font-size:19px}
 .home-card p{margin:0 0 16px;color:var(--muted);font-size:13px;line-height:1.55}
 .btn-card{
@@ -241,6 +243,7 @@ button{cursor:pointer}
 .card-blue .btn-card{background:var(--blue)}
 .card-purple .btn-card{background:var(--purple)}
 .card-orange .btn-card{background:var(--orange)}
+.card-teal .btn-card{background:var(--teal)}
 .security{
   margin-top:18px;padding:15px 18px;background:#fffaf0;border:1px solid #f3dfab;border-radius:10px;
   font-size:12px;line-height:1.55;color:#475569;
@@ -418,16 +421,13 @@ button{cursor:pointer}
 
 .history-list{display:flex;flex-direction:column;gap:8px}
 .history-item{
-  display:grid;grid-template-columns:155px 1fr auto auto;gap:14px;align-items:center;
+  display:grid;grid-template-columns:155px 1fr auto;gap:14px;align-items:center;
   border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fff;
 }
 .history-id{font-weight:800;color:var(--blue);font-size:11px}
 .history-file{font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .history-meta{font-size:10.5px;color:var(--muted);margin-top:3px}
 .history-cert{font-size:11px;color:#334155;text-align:right}
-.history-pdf{display:flex;justify-content:flex-end}
-.history-pdf .btn-hist-pdf svg{width:13px;height:13px}
-.hist-pdf-na{font-size:10.5px;color:var(--muted);white-space:nowrap}
 .empty{padding:30px;text-align:center;color:var(--muted);font-size:12px}
 
 .about-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}

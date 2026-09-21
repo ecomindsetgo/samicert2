@@ -2084,24 +2084,25 @@ function actualizarAccesoAdministrador() {
 
   const navCertificar = document.querySelector('.nav-btn[data-page="certificar"]');
   const navFirmar = $("navFirmar");
-  const navInicio = document.querySelector('.nav-btn[data-page="inicio"]');
   const navVerificar = document.querySelector('.nav-btn[data-page="verificar"]');
-  const navAcerca = document.querySelector('.nav-btn[data-page="acerca"]');
-  const navSeguridad = document.querySelector('.nav-btn[data-page="seguridad"]');
 
+  // Mesa de Partes: no certifica ni verifica desde el menú (solo firma/remite
+  // e historial), pero sí tiene Inicio, Acerca de y Cambio de contraseña,
+  // igual que los certificadores.
   if (navCertificar) navCertificar.classList.toggle("oculto", esMesa);
+  if (navVerificar) navVerificar.classList.toggle("oculto", esMesa);
   if (navFirmar) navFirmar.classList.toggle("oculto", !esMesa);
-  if (esMesa) {
-    [navInicio, navVerificar, navAcerca, navSeguridad, navAdmin].forEach(el => {
-      if (el) el.classList.add("oculto");
-    });
-    if (btnCambiarPassword) btnCambiarPassword.classList.add("oculto");
-  } else {
-    [navInicio, navVerificar, navAcerca, navSeguridad].forEach(el => {
-      if (el) el.classList.remove("oculto");
-    });
-    if (btnCambiarPassword) btnCambiarPassword.classList.remove("oculto");
-  }
+  if (btnCambiarPassword) btnCambiarPassword.classList.remove("oculto");
+
+  // Accesos directos de la página de Inicio: para Mesa de Partes solo se
+  // muestran los que corresponden a su rol (Firmar y remitir, Historial,
+  // Acerca de); Certificar y Verificar quedan ocultos.
+  const cardCertificar = $("cardInicioCertificar");
+  const cardVerificar = $("cardInicioVerificar");
+  const cardFirmar = $("cardInicioFirmar");
+  if (cardCertificar) cardCertificar.classList.toggle("oculto", esMesa);
+  if (cardVerificar) cardVerificar.classList.toggle("oculto", esMesa);
+  if (cardFirmar) cardFirmar.classList.toggle("oculto", !esMesa);
 }
 
 function formatoFechaRegistro(r) {
@@ -2316,6 +2317,18 @@ async function cargarPerfil(user) {
       uid:user.uid,
       rol:esAdmin ? "administrador" : (esMesa ? "mesa_partes" : (snap.data().rol || "certificador"))
     };
+
+    // Autocorrección: cuentas antiguas de Mesa de Partes que quedaron
+    // guardadas con el nombre por defecto "Administrador" (bug ya
+    // corregido) se actualizan aquí para mostrar "Mesa de Partes".
+    if (esMesa && (!perfilActual.nombre || perfilActual.nombre === "Administrador")) {
+      perfilActual.nombre = "Mesa de Partes";
+      try {
+        await setDoc(doc(db,"usuarios",user.uid), { nombre:"Mesa de Partes" }, { merge:true });
+      } catch (err) {
+        console.warn("No se pudo corregir el nombre guardado de Mesa de Partes:", err);
+      }
+    }
   }
 
   esAdministradorActual = esAdmin;
