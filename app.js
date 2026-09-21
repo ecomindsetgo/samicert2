@@ -1315,17 +1315,48 @@ function nombreConSufijo(nombre) {
 }
 
 async function guardarResultado(bytesSalida,nombre,handleDestino) {
-  const blob = new Blob([bytesSalida],{type:"application/pdf"});
+  const blob = new Blob([bytesSalida], { type: "application/pdf" });
 
-  
+  // Cuando el usuario eligió una ubicación mediante showSaveFilePicker,
+  // guardamos de forma explícita y VERIFICAMOS el archivo físico antes de
+  // considerar terminada la operación. Esto evita falsos positivos cuando
+  // Windows/Chrome no termina de escribir el archivo.
   if (handleDestino) {
     const writable = await handleDestino.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    return true;
+    try {
+      await writable.write(blob);
+    } finally {
+      await writable.close();
+    }
+
+    const archivoGuardado = await handleDestino.getFile();
+    if (!archivoGuardado || archivoGuardado.size !== bytesSalida.byteLength) {
+      throw new Error(
+        `El archivo no se guardó completamente. Tamaño esperado: ${bytesSalida.byteLength.toLocaleString()} bytes; tamaño encontrado: ${archivoGuardado?.size ?? 0} bytes.`
+      );
+    }
+
+    // Comprobación adicional: calculamos la huella del archivo ya guardado
+    // y la comparamos con la huella de los bytes que SAMICERT intentó guardar.
+    const bytesVerificados = await archivoGuardado.arrayBuffer();
+    const shaGuardado = await calcularSHA256(bytesVerificados);
+    const shaEsperado = await calcularSHA256(bytesSalida);
+    if (shaGuardado !== shaEsperado) {
+      throw new Error("El PDF guardado no coincide exactamente con el PDF firmado generado por SAMICERT.");
+    }
+
+    return {
+      guardado: true,
+      verificado: true,
+      handle: handleDestino,
+      file: archivoGuardado,
+      blob: new Blob([bytesVerificados], { type: "application/pdf" }),
+      sha256: shaGuardado,
+      nombre: archivoGuardado.name || nombre
+    };
   }
 
-  
+  // Respaldo para navegadores que no soportan showSaveFilePicker.
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -1333,8 +1364,63 @@ async function guardarResultado(bytesSalida,nombre,handleDestino) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url),2000);
-  return true;
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return {
+    guardado: true,
+    verificado: false,
+    handle: null,
+    file: null,
+    blob,
+    sha256: await calcularSHA256(bytesSalida),
+    nombre
+  };
+}
+
+function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, firebaseMensaje = "") {
+  const box = $("hashResultado");
+  if (!box) return;
+
+  const nombreSeguro = escapeHtml(resultado?.nombre || nombre);
+  const estadoFirebase = firebaseOk
+    ? `<div style="margin-top:8px;color:#16823a;font-size:12px;font-weight:700">✓ Registro de certificación actualizado correctamente.</div>`
+    : `<div style="margin-top:8px;color:#8a6416;font-size:12px;font-weight:700">⚠️ El PDF quedó guardado localmente. El registro en Firebase no pudo actualizarse${firebaseMensaje ? `: ${escapeHtml(firebaseMensaje)}` : "."}</div>`;
+
+  const abrir = resultado?.verificado
+    ? `<button type="button" class="btn-green" id="btnAbrirPdfCertificado" style="margin-top:12px">📄 Abrir PDF certificado</button>`
+    : `<div style="margin-top:10px;font-size:12px;color:#64748b">El PDF se envió a la carpeta de descargas del navegador.</div>`;
+
+  box.classList.remove("oculto");
+  box.style.borderLeftColor = "#16823a";
+  box.style.background = "#f6fbf8";
+  box.innerHTML = `
+    <div class="hash-titulo" style="color:#16823a">✓ PDF certificado guardado correctamente</div>
+    <div style="margin-top:7px;font-size:12px;line-height:1.5">
+      <strong>Archivo:</strong> ${nombreSeguro}<br>
+      <strong>ID:</strong> ${escapeHtml(idFinal)}<br>
+      <strong>SHA-256:</strong> <span style="word-break:break-all">${escapeHtml(resultado.sha256 || "")}</span><br>
+      ${resultado.verificado ? "✓ Se verificó el tamaño y la huella del archivo después de guardarlo." : ""}
+    </div>
+    ${abrir}
+    ${estadoFirebase}`;
+
+  const btnAbrir = $("btnAbrirPdfCertificado");
+  if (btnAbrir && resultado.file) {
+    btnAbrir.addEventListener("click", () => {
+      const url = URL.createObjectURL(resultado.file);
+      const ventana = window.open(url, "_blank", "noopener,noreferrer");
+      if (!ventana) {
+        // Si el navegador bloquea la ventana emergente, el enlace se descarga
+        // como alternativa sin perder la referencia al archivo verificado.
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = resultado.nombre || nombre;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    });
+  }
 }
 
 btnAplicar.addEventListener("click", async () => {
@@ -1532,7 +1618,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       firmaDigitalTipo: "FIRMA ONPE",
       firmadoEnSAMICERT: serverTimestamp(),
       creadoEn: serverTimestamp(),
-      version: 11,
+      version: 12,
       estado: "certificado"
     };
 
@@ -1544,18 +1630,10 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       );
     }
 
-    // Se registra una sola vez y únicamente DESPUÉS de tener el PDF firmado y su SHA final.
-    try {
-      await setDoc(doc(db, "certificaciones", procesoFirmaPendiente.id), registro);
-    } catch (firebaseError) {
-      if (firebaseError?.code === "permission-denied") {
-        throw new Error(
-          `Firebase rechazó el registro por permisos de Firestore. Usuario: ${usuarioActual.email || "sin correo"} · UID: ${usuarioActual.uid}. Verifique que este UID/correo esté autorizado en firestore.rules y que las reglas hayan sido publicadas en Firebase.`
-        );
-      }
-      throw firebaseError;
-    }
-
+    // PRIMERO: guardar el PDF firmado físicamente en la ubicación elegida
+    // por el operador. La certificación local NO depende de Firebase Storage.
+    // Si Firebase no está disponible o no tiene cuota, el PDF ya quedó guardado
+    // y verificado en el equipo.
     const nombreFinal = nombreConSufijo(procesoFirmaPendiente.archivoOriginal);
     let handleDestino = null;
     if ("showSaveFilePicker" in window) {
@@ -1566,19 +1644,30 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
         });
       } catch (err) {
         if (err.name === "AbortError") {
-          // El registro ya es válido: si el operador no selecciona ubicación,
-          // se descarga una copia como respaldo para no perder el PDF final.
-          handleDestino = null;
-        } else {
-          throw err;
+          throw new Error("Se canceló la selección de la carpeta. El PDF no se ha dado por guardado.");
         }
+        throw err;
       }
     }
 
-    await guardarResultado(bytesFirmados, nombreFinal, handleDestino);
+    const resultadoGuardado = await guardarResultado(bytesFirmados, nombreFinal, handleDestino);
 
     const idFinal = procesoFirmaPendiente.id;
     const eraRecert = procesoFirmaPendiente.esRecertificacion;
+
+    // SEGUNDO: intentar registrar en Firestore. Esto es complementario al
+    // archivo local; un fallo de Firebase no invalida el PDF ya verificado.
+    let firebaseOk = false;
+    let firebaseMensaje = "";
+    try {
+      await setDoc(doc(db, "certificaciones", procesoFirmaPendiente.id), registro);
+      firebaseOk = true;
+    } catch (firebaseError) {
+      console.error("No se pudo actualizar Firebase después de guardar el PDF local:", firebaseError);
+      firebaseMensaje = firebaseError?.code === "permission-denied"
+        ? "permisos de Firestore insuficientes"
+        : (firebaseError?.message || "error de conexión o cuota");
+    }
 
     procesoFirmaPendiente = null;
     pdfFirmadoSeleccionado = null;
@@ -1586,16 +1675,17 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
     if (panelFirma) panelFirma.classList.add("oculto");
 
     limpiarArchivo();
-    mostrarEstado(
-      eraRecert
-        ? `Recertificación registrada definitivamente. PDF firmado por ${registro.certificadorNombre}. SHA-256 final calculado después de la firma. ID: ${idFinal}.`
-        : `Certificación registrada definitivamente. PDF firmado por ${registro.certificadorNombre}. SHA-256 final calculado después de la firma. ID: ${idFinal}.`,
-      "ok"
+    mostrarResultadoGuardado(
+      resultadoGuardado,
+      nombreFinal,
+      idFinal,
+      firebaseOk,
+      firebaseMensaje
     );
   } catch (err) {
     console.error(err);
     mostrarEstado(
-      "No se pudo registrar el PDF firmado. La certificación no se completó: " + (err.message || ""),
+      "No se pudo completar el guardado del PDF firmado. La certificación local no se completó: " + (err.message || ""),
       "error"
     );
     btnRegistrarFirmado.disabled = false;
