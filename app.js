@@ -1587,12 +1587,15 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
   btnAplicar.disabled = true;
 
   try {
-    const bytesFirmados = await pdfFirmadoSeleccionado.arrayBuffer();
+    // Conservamos una copia independiente y mutable del PDF firmado.
+    // Cada librería recibe su PROPIA copia para evitar que PDF.js/PDF-Lib
+    // transfieran o desacoplen el ArrayBuffer que luego necesitamos guardar.
+    const bytesFirmados = new Uint8Array(await pdfFirmadoSeleccionado.arrayBuffer());
 
     // Validación mínima: debe ser un PDF válido y conservar el ID visible
     // de la carátula que SAMICERT generó antes de la firma.
     try {
-      await PDFLib.PDFDocument.load(bytesFirmados);
+      await PDFLib.PDFDocument.load(bytesFirmados.slice());
     } catch (e) {
       throw new Error("El archivo seleccionado no es un PDF válido o está dañado.");
     }
@@ -1607,7 +1610,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
         // PDF.js puede transferir (y por tanto "desacoplar") el ArrayBuffer
         // recibido. Nunca le entregamos el buffer original porque después
         // necesitamos calcular SHA-256 y guardarlo en disco.
-        const bytesParaPdfJs = new Uint8Array(bytesFirmados);
+        const bytesParaPdfJs = bytesFirmados.slice();
         const loadingTask = pdfjsLib.getDocument({ data: bytesParaPdfJs });
         const pdfVerificacion = await loadingTask.promise;
         const primeraPagina = await pdfVerificacion.getPage(1);
@@ -1627,7 +1630,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
     }
 
     // ESTE es el SHA definitivo: corresponde al PDF ya firmado digitalmente.
-    const sha256Final = await calcularSHA256(bytesFirmados);
+    const sha256Final = await calcularSHA256(bytesFirmados.slice());
 
     const registro = {
       id: procesoFirmaPendiente.id,
@@ -1684,7 +1687,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       }
     }
 
-    const resultadoGuardado = await guardarResultado(bytesFirmados, nombreFinal, handleDestino, pdfFirmadoSeleccionado);
+    const resultadoGuardado = await guardarResultado(bytesFirmados.slice(), nombreFinal, handleDestino, null);
 
     const idFinal = procesoFirmaPendiente.id;
     const eraRecert = procesoFirmaPendiente.esRecertificacion;
