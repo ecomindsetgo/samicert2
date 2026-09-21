@@ -18,37 +18,71 @@ service cloud.firestore {
         );
     }
 
+    function esMesaPartes() {
+      return request.auth != null &&
+        request.auth.token.email == "archivocsjsanta@pj.gob.pe";
+    }
+
     match /usuarios/{uid} {
-      allow read: if esAdministrador() || (esCertificador() && request.auth.uid == uid);
+      allow read: if esAdministrador() ||
+        (esCertificador() && request.auth.uid == uid) ||
+        (esMesaPartes() && request.auth.uid == uid);
 
       allow create: if
         (esAdministrador() && request.auth.uid == uid) ||
-        (esCertificador() && request.auth.uid == uid);
+        (esCertificador() && request.auth.uid == uid) ||
+        (esMesaPartes() && request.auth.uid == uid);
 
       allow update: if
         (esAdministrador() && request.auth.uid == uid) ||
-        (esCertificador() && request.auth.uid == uid);
+        (esCertificador() && request.auth.uid == uid) ||
+        (esMesaPartes() && request.auth.uid == uid);
 
       allow delete: if false;
     }
 
-    match /certificaciones/{certificacionId} {
-
-      allow get: if true;
-      allow list: if esAdministrador() || esCertificador();
+    // Bandeja de documentos generados por los certificadores y pendientes de firma.
+    match /pendientesFirma/{pendienteId} {
+      allow read: if esAdministrador() || esCertificador() || esMesaPartes();
 
       allow create: if esCertificador()
-        && request.resource.data.certificadorUid == request.auth.uid;
+        && request.resource.data.certificadorUid == request.auth.uid
+        && request.resource.data.estado == "pendiente-firma";
+
+      allow update: if esMesaPartes()
+        && resource.data.estado == "pendiente-firma"
+        && request.resource.data.estado == "pendiente-firma";
+
+      allow delete: if esAdministrador() || esMesaPartes();
+
+      match /pdfChunks/{chunkId} {
+        allow read: if esAdministrador() || esCertificador() || esMesaPartes();
+        allow create: if esCertificador();
+        allow update: if false;
+        allow delete: if esAdministrador() || esMesaPartes();
+      }
+    }
+
+    match /certificaciones/{certificacionId} {
+      allow get: if true;
+      allow list: if esAdministrador() || esCertificador() || esMesaPartes();
+
+      // El certificador ya no crea la certificación definitiva.
+      // Mesa de Partes la crea después de verificar el PDF firmado.
+      allow create: if esMesaPartes()
+        && request.resource.data.certificadorUid ==
+          get(/databases/$(database)/documents/pendientesFirma/$(certificacionId)).data.certificadorUid
+        && request.resource.data.firmanteUid == request.auth.uid
+        && request.resource.data.estado == "certificado";
 
       allow update: if false;
       allow delete: if esAdministrador();
 
-      // Trozos en base64 del PDF certificado (archivado sin Firebase Storage).
       match /pdfChunks/{chunkId} {
-        allow read: if esAdministrador() || esCertificador();
-        allow create: if esCertificador();
+        allow read: if esAdministrador() || esCertificador() || esMesaPartes();
+        allow create: if esMesaPartes();
         allow update: if false;
-        allow delete: if esAdministrador() || esCertificador();
+        allow delete: if esAdministrador() || esMesaPartes();
       }
     }
 
