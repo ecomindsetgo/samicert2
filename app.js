@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc, setDoc, deleteDoc, query, collection, where, limit, getDocs, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 import {
-  getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject
+  getStorage, ref as storageRef, deleteObject
 } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-storage.js";
 import { firebaseConfig, ADMIN_UID } from "./firebase-config.js";
 
@@ -1409,24 +1409,11 @@ btnAplicar.addEventListener("click",async () => {
     const resultado = await aplicarSelloAUnPdf(archivoSeleccionado.file);
     const sha256 = await calcularSHA256(resultado.bytesSalida);
 
-    // ── Respaldo del PDF final dentro del sistema (Firebase Storage) ──────
-    // Si el respaldo en la nube falla (sin conexión, cuota, etc.) la
-    // certificación NO se cancela: el certificador ya recibió su copia
-    // local. Solo se deja constancia de que el respaldo no quedó guardado.
-    let pdfStorageUrl = "";
-    let pdfStoragePath = "";
-    let respaldoPdfError = "";
-    try {
-      pdfStoragePath = `certificaciones/${resultado.meta.id}.pdf`;
-      const refPdf = storageRef(storage, pdfStoragePath);
-      await uploadBytes(refPdf, resultado.bytesSalida, { contentType: "application/pdf" });
-      pdfStorageUrl = await getDownloadURL(refPdf);
-    } catch (errStorage) {
-      console.error("No se pudo respaldar el PDF en el sistema:", errStorage);
-      pdfStoragePath = "";
-      respaldoPdfError = errStorage?.message || "error desconocido";
-    }
-
+    // ── El PDF final NO se respalda en el sistema (Firebase Storage) ──────
+    // Por decisión operativa, el único ejemplar del PDF certificado queda
+    // en el equipo del certificador. El sistema solo conserva el registro
+    // (metadatos + SHA-256) en Firestore, para poder verificar integridad
+    // sin necesitar el archivo en sí.
     const registro = {
       ...resultado.meta,
       sha256,
@@ -1440,10 +1427,8 @@ btnAplicar.addEventListener("click",async () => {
       zonaHoraria:"America/Lima",
       selloArchivo:USUARIOS_AUTORIZADOS[usuarioActual.uid].sello.replace("./",""),
       creadoEn:serverTimestamp(),
-      version:8,
-      estado:"certificado",
-      pdfStorageUrl,
-      pdfStoragePath
+      version:9,
+      estado:"certificado"
     };
 
     await setDoc(doc(db,"certificaciones",resultado.meta.id),registro);
@@ -1451,20 +1436,16 @@ btnAplicar.addEventListener("click",async () => {
 
     limpiarArchivo();
 
-    const notaRespaldo = pdfStorageUrl
-      ? " El PDF final también quedó respaldado en el sistema y puede consultarse desde el Historial."
-      : ` El PDF final NO pudo respaldarse en el sistema (${respaldoPdfError}); solo quedó guardado localmente.`;
-
     if (duplicadosDetectados.length) {
       mostrarEstado(
         "Recertificación registrada. Quedó constancia permanente del motivo y de los identificadores previos: " +
-        duplicadosDetectados.map(c => c.registro.id || c.docId).join(", ") + "." + notaRespaldo,
-        pdfStorageUrl ? "ok" : "error"
+        duplicadosDetectados.map(c => c.registro.id || c.docId).join(", ") + ". El PDF final quedó guardado únicamente en este equipo.",
+        "ok"
       );
     } else {
       mostrarEstado(
-        "Certificación registrada correctamente. El identificador y SHA-256 fueron almacenados automáticamente." + notaRespaldo,
-        pdfStorageUrl ? "ok" : "error"
+        "Certificación registrada correctamente. El identificador y SHA-256 fueron almacenados automáticamente. El PDF final quedó guardado únicamente en este equipo.",
+        "ok"
       );
     }
     duplicadosDetectados = [];
@@ -1489,25 +1470,6 @@ btnAplicar.addEventListener("click",async () => {
   }
 });
 
-// ── Acceso al PDF final respaldado en Firebase Storage ──────────────────
-function botonVerPdfHtml(r) {
-  if (r.pdfStorageUrl) {
-    return `<button type="button" class="btn-ver-pdf" data-ver-pdf="${escapeHtml(r.pdfStorageUrl)}">${ICONOS.ver}<span>Ver PDF certificado</span></button>`;
-  }
-  return `<span class="sin-pdf-respaldo">${ICONOS.nube}<span>PDF no respaldado en el sistema</span></span>`;
-}
-
-function abrirPdfRespaldado(url) {
-  if (!url) return;
-  window.open(url, "_blank", "noopener");
-}
-
-function activarBotonesVerPdf(contenedor) {
-  contenedor.querySelectorAll("[data-ver-pdf]").forEach(btn =>
-    btn.addEventListener("click", () => abrirPdfRespaldado(btn.dataset.verPdf))
-  );
-}
-
 async function renderDetalleConsulta(registro) {
   const paginas = (registro.paginasCertificadas || []).join(", ");
 
@@ -1519,10 +1481,8 @@ async function renderDetalleConsulta(registro) {
     <strong>Fecha / hora:</strong> ${escapeHtml(registro.fecha || "")} ${escapeHtml(registro.hora || "")}<br>
     <strong>Páginas certificadas:</strong> ${escapeHtml(paginas)} de ${escapeHtml(registro.totalPaginas || "")}<br>
     <strong>Estado:</strong> Certificación registrada${registro.esRecertificacion ? '<br><br><strong style="color:#b42318">⚠ RECERTIFICACIÓN</strong><br><strong>Motivo declarado:</strong> ' + escapeHtml(registro.motivoRecertificacion || "sin motivo registrado") + '<br><strong>Certificaciones previas del mismo documento:</strong> ' + escapeHtml((registro.certificacionesPrevias || []).join(", ")) : ""}
-    <div class="detalle-pdf">${botonVerPdfHtml(registro)}</div>
   `;
 
-  activarBotonesVerPdf($("detalleConsulta"));
   $("resultadoConsulta").classList.remove("oculto");
   $("noEncontradoConsulta").classList.add("oculto");
 }
@@ -1597,9 +1557,7 @@ $("inputVerificarPdf").addEventListener("change",async e => {
           <strong>Fecha / hora:</strong> ${escapeHtml(registro.fecha || "")} ${escapeHtml(registro.hora || "")}<br>
           <strong>Páginas certificadas:</strong> ${escapeHtml((registro.paginasCertificadas || []).join(", "))} de ${escapeHtml(registro.totalPaginas || "")}<br>
           <strong>Estado:</strong> Certificación registrada${registro.esRecertificacion ? '<br><strong style="color:#b42318">⚠ Recertificación:</strong> ' + escapeHtml(registro.motivoRecertificacion || "sin motivo registrado") + '<br><strong>Certificaciones previas:</strong> ' + escapeHtml((registro.certificacionesPrevias || []).join(", ")) : ""}
-          <div class="detalle-pdf">${botonVerPdfHtml(registro)}</div>
         </div>`;
-      activarBotonesVerPdf(detalle);
     } else {
       detalle.innerHTML = `
         <div class="hash-titulo" style="color:#b42318">✗ Este PDF NO coincide con ninguna certificación registrada</div>
@@ -1723,7 +1681,6 @@ function renderHistorialPagina() {
       <div>
         <div class="history-file">${escapeHtml(r.archivoOriginal || "Documento PDF")}</div>
         <div class="history-meta">${escapeHtml(r.fecha || "")} ${escapeHtml(r.hora || "")} · ${escapeHtml((r.paginasCertificadas || []).length)} página(s)</div>
-        ${botonVerPdfHtml(r)}
       </div>
       <div class="history-cert">
         <strong>${escapeHtml(r.certificadorNombre || "")}</strong><br>
@@ -1731,9 +1688,6 @@ function renderHistorialPagina() {
       </div>
     </div>
   `).join("");
-  contenedor.querySelectorAll("[data-ver-pdf]").forEach(btn =>
-    btn.addEventListener("click", () => abrirPdfRespaldado(btn.dataset.verPdf))
-  );
 
   paginacion.classList.toggle("oculto", totalPaginas <= 1);
   $("histPaginaIndicador").textContent = `Página ${historialPaginaActual} de ${totalPaginas}`;

@@ -34,9 +34,15 @@ Se incorporó un tercer usuario con rol administrativo. El administrador:
 ## Respaldos
 La función **Generar respaldo** descarga un archivo JSON con los registros de certificación, incluyendo SHA-256, identificador, certificador, fecha, hora y páginas certificadas.
 
-Desde la versión **2.1.0**, además del respaldo JSON de los registros, el **PDF final certificado se sube automáticamente a Firebase Storage** (`certificaciones/{ID}.pdf`) como respaldo del archivo en sí. Si la subida falla (por ejemplo, sin conexión), la certificación local no se cancela: solo se advierte al certificador que ese respaldo en particular no quedó guardado.
+El **PDF final certificado se guarda únicamente en el equipo del certificador**: el sistema no sube ni conserva una copia del archivo en sí (Firestore solo almacena los metadatos y el SHA-256 del documento, lo que permite verificar su integridad sin necesitar el PDF).
 
 Para respaldos automáticos programados en la nube (por ejemplo, diarios de la base de Firestore) se recomienda añadir posteriormente una Cloud Function/servicio de servidor con privilegios de Firebase Admin SDK.
+
+## Versión 2.2.0
+- **Se quitó el respaldo del PDF final en el sistema.** Desde esta versión, el PDF certificado ya no se sube a Firebase Storage: el único ejemplar del archivo final queda en el equipo del certificador (descarga local), como en versiones anteriores a la 2.1.0.
+- Se eliminó el botón "Ver PDF certificado" del Historial y de Verificar Documento (por ID o por hash), ya que no hay archivo respaldado que abrir.
+- Los registros de Firestore siguen guardando el SHA-256 del documento, por lo que la verificación de integridad contra el PDF que tenga en mano el usuario sigue funcionando igual.
+- El botón "Eliminar seleccionados" de Administración sigue intentando borrar, por compatibilidad, cualquier PDF que haya quedado respaldado en Storage por certificaciones hechas con la versión 2.1.0; si no existe, simplemente lo ignora.
 
 ## Limpieza de pruebas
 Antes de eliminar registros de prueba:
@@ -55,7 +61,7 @@ El sistema calcula SHA-256 sobre los bytes exactos del PDF final después de apl
 - `app.js` — lógica de la aplicación (Firebase, sellado con pdf-lib, visor con pdf.js, administración).
 - `firebase-config.js` — configuración Firebase y UID administrativo.
 - `firestore.rules` — seguridad de Firestore.
-- `storage.rules` — seguridad de Firebase Storage (respaldo de los PDF certificados).
+- `storage.rules` — seguridad de Firebase Storage. Ya no se usa para subir PDFs certificados (ver v2.2.0); se conserva solo para permitir a Administración borrar respaldos antiguos de versiones previas del sistema, si existieran.
 - `sello-jorge.png` — sello del certificador Jorge.
 - `sello-roberto.png` — sello del certificador Roberto.
 - `logo-institucional.png` — **opcional**. Si se publica un archivo con este nombre exacto junto a los demás, la carátula del PDF final lo usa como logo institucional; si no existe, se dibuja un marcador con las iniciales "PJ".

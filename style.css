@@ -427,20 +427,6 @@ button{cursor:pointer}
 .history-cert{font-size:11px;color:#334155;text-align:right}
 .empty{padding:30px;text-align:center;color:var(--muted);font-size:12px}
 
-.btn-ver-pdf{
-  display:inline-flex;align-items:center;gap:6px;margin-top:8px;
-  border:1px solid #cfe0f5;background:#f2f7ff;color:#1156ad;border-radius:7px;
-  padding:6px 11px;font-size:11px;font-weight:800;cursor:pointer;transition:background .12s ease,transform .12s ease;
-}
-.btn-ver-pdf svg{width:14px;height:14px;flex:0 0 auto}
-.btn-ver-pdf:hover{background:#e3edff;transform:translateY(-1px)}
-.sin-pdf-respaldo{
-  display:inline-flex;align-items:center;gap:6px;margin-top:8px;color:var(--muted);
-  font-size:10.5px;font-style:italic;
-}
-.sin-pdf-respaldo svg{width:13px;height:13px;flex:0 0 auto;opacity:.7}
-.detalle-pdf{margin-top:10px}
-
 .about-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
 .about-box{border:1px solid var(--line);border-radius:10px;padding:18px;background:#fff}
 .about-box h3{margin:0 0 7px;font-size:15px}
