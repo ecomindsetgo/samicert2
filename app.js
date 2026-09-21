@@ -900,7 +900,11 @@ function pivoteParaRotar(centro, tamano, giroDeg) {
   return { x: centro.x - rx, y: centro.y - ry };
 }
 
-function dibujarSelloEnEsquina(pagina, imagen, esquina, tamano, margen, rotacionFinal) {
+// Calcula dónde va a caer el sello (esquina/pivote/giro) SIN dibujar nada todavía.
+// Esto permite dibujar primero los textos (fecha/hora/código/folio) y recién
+// después la imagen del sello encima, para que el texto quede detrás de la
+// firma/imagen y no compitiendo visualmente con ella.
+function calcularPosicionSello(pagina, esquina, tamano, margen, rotacionFinal) {
   const centro = centroSelloEnCoordenadasPdf(
     pagina, esquina, tamano, margen, rotacionFinal
   );
@@ -909,14 +913,6 @@ function dibujarSelloEnEsquina(pagina, imagen, esquina, tamano, margen, rotacion
   const giroSello = rot === 90 ? 90 : rot === 180 ? 180 : rot === 270 ? 270 : 0;
   const pivote = pivoteParaRotar(centro, tamano, giroSello);
 
-  pagina.drawImage(imagen, {
-    x: pivote.x,
-    y: pivote.y,
-    width: tamano,
-    height: tamano,
-    rotate: PDFLib.degrees(giroSello)
-  });
-
   return {
     x: pivote.x,
     y: pivote.y,
@@ -924,39 +920,15 @@ function dibujarSelloEnEsquina(pagina, imagen, esquina, tamano, margen, rotacion
   };
 }
 
-// ── Utilidades para la numeración "Página X/N" en cada hoja certificada ──
-function visualAPdf(width, height, visualX, visualY, rot) {
-  rot = ((Number(rot) % 360) + 360) % 360;
-  if (rot === 90) return { x: width - visualY, y: visualX };
-  if (rot === 180) return { x: width - visualX, y: height - visualY };
-  if (rot === 270) return { x: visualY, y: height - visualX };
-  return { x: visualX, y: visualY };
-}
-
-function dibujarNumeracionPagina(pagina, indice, total, rotacionFinal, fuente) {
-  const { width, height } = pagina.getSize();
-  const rot = ((Number(rotacionFinal) % 360) + 360) % 360;
-  const anchoVisual = (rot === 90 || rot === 270) ? height : width;
-
-  const texto = `Página ${indice}/${total}`;
-  const size = 8;
-  const ancho = fuente.widthOfTextAtSize(texto, size);
-  const margenInferior = 11;
-
-  const pivote = visualAPdf(width, height, anchoVisual / 2, margenInferior, rot);
-  const giro = rot === 90 ? 90 : rot === 180 ? 180 : rot === 270 ? 270 : 0;
-  const rad = giro * Math.PI / 180;
-  const cos = Math.cos(rad), sin = Math.sin(rad);
-  const localX = -ancho / 2;
-  const localY = 0;
-
-  pagina.drawText(texto, {
-    x: pivote.x + (cos * localX - sin * localY),
-    y: pivote.y + (sin * localX + cos * localY),
-    size,
-    font: fuente,
-    color: PDFLib.rgb(0.32, 0.36, 0.42),
-    rotate: PDFLib.degrees(giro)
+// Dibuja la imagen del sello en la posición ya calculada. Se llama DESPUÉS de
+// dibujar los textos, así la imagen queda por delante (encima) de ellos.
+function dibujarImagenSello(pagina, imagen, posicion, tamano) {
+  pagina.drawImage(imagen, {
+    x: posicion.x,
+    y: posicion.y,
+    width: tamano,
+    height: tamano,
+    rotate: PDFLib.degrees(posicion.giro)
   });
 }
 
@@ -1235,7 +1207,6 @@ async function aplicarSelloAUnPdf(file) {
   }
 
   const fuente = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const fuenteNumeracion = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const tamano = TAMANO_SELLO_PT;
   const margen = MARGEN_SELLO_PT;
   const esquina = ESQUINA_SELLO;
@@ -1264,40 +1235,44 @@ async function aplicarSelloAUnPdf(file) {
 
     if (!paginasSeleccionadas.has(n)) return;
 
-    const sello = dibujarSelloEnEsquina(
-      pagina,
-      sellImage,
-      esquina,
-      tamano,
-      margen,
-      rotacionFinal
+    // 1) Se calcula dónde va a caer el sello, pero todavía no se dibuja la imagen.
+    const posSello = calcularPosicionSello(
+      pagina, esquina, tamano, margen, rotacionFinal
     );
+
+    const numeroFolio = ordenCertificadas.indexOf(n) + 1;
+    const textoFolio = `Página ${numeroFolio}/${totalCertificadas}`;
 
     const tamFuenteFecha = Math.max(6.5, tamano * 0.078);
     const tamFuenteHora = Math.max(4.2, tamFuenteFecha * 0.55);
     const tamFuenteId = Math.max(3.8, tamFuenteFecha * 0.48);
+    const tamFuenteFolio = tamFuenteId;
     const textos = [
       [fecha, tamFuenteFecha],
       [hora, tamFuenteHora],
-      [certId, tamFuenteId]
+      [certId, tamFuenteId],
+      [textoFolio, tamFuenteFolio]
     ];
 
     const ys = [
       tamano * 0.49,
       tamano * 0.49 - tamFuenteFecha * 0.85,
-      tamano * 0.49 - tamFuenteFecha * 1.55
+      tamano * 0.49 - tamFuenteFecha * 1.55,
+      tamano * 0.49 - tamFuenteFecha * 2.15
     ];
 
-    const radGiro = sello.giro * Math.PI / 180;
+    const radGiro = posSello.giro * Math.PI / 180;
     const cosGiro = Math.cos(radGiro);
     const sinGiro = Math.sin(radGiro);
 
+    // 2) Se dibujan primero los textos (fecha, hora, código y folio): quedan
+    //    "detrás" porque la imagen del sello se dibuja recién después, encima.
     textos.forEach(([texto, size], i) => {
       const ancho = fuente.widthOfTextAtSize(texto, size);
       const localX = tamano / 2 - ancho / 2;
       const localY = ys[i];
-      const px = sello.x + (cosGiro * localX - sinGiro * localY);
-      const py = sello.y + (sinGiro * localX + cosGiro * localY);
+      const px = posSello.x + (cosGiro * localX - sinGiro * localY);
+      const py = posSello.y + (sinGiro * localX + cosGiro * localY);
 
       pagina.drawText(texto, {
         x: px,
@@ -1305,17 +1280,14 @@ async function aplicarSelloAUnPdf(file) {
         size,
         font: fuente,
         color: rgb(0.67, 0.14, 0.09),
-        rotate: PDFLib.degrees(sello.giro)
+        rotate: PDFLib.degrees(posSello.giro)
       });
     });
 
-    dibujarNumeracionPagina(
-      pagina,
-      ordenCertificadas.indexOf(n) + 1,
-      totalCertificadas,
-      rotacionFinal,
-      fuenteNumeracion
-    );
+    // 3) Recién ahora se dibuja la imagen del sello, por encima del texto.
+    //    En las zonas transparentes del PNG (fuera de la firma/tinta) el
+    //    texto sigue siendo visible; donde el sello es opaco, lo tapa.
+    dibujarImagenSello(pagina, sellImage, posSello, tamano);
   });
 
   await crearPaginaCaratula(pdfDoc, {
