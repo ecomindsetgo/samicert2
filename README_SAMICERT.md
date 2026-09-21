@@ -44,6 +44,13 @@ Para respaldos automáticos programados en la nube (por ejemplo, diarios de la b
 - Los registros de Firestore siguen guardando el SHA-256 del documento, por lo que la verificación de integridad contra el PDF que tenga en mano el usuario sigue funcionando igual.
 - El botón "Eliminar seleccionados" de Administración sigue intentando borrar, por compatibilidad, cualquier PDF que haya quedado respaldado en Storage por certificaciones hechas con la versión 2.1.0; si no existe, simplemente lo ignora.
 
+## Versión 2.3.0
+- **Logo institucional en la primera hoja:** `logo-institucional.png` es en realidad una imagen JPEG con extensión ".png". `pdf-lib` intentaba leerla como PNG, fallaba y la carátula caía en silencio al marcador "PJ". Ahora `app.js` detecta el formato real por los primeros bytes del archivo (PNG o JPEG) y la incrusta correctamente. Como el logo ya trae la leyenda "Poder Judicial del Perú", la carátula no repite el nombre de la institución debajo de él.
+- **Página pública de consulta (`verificar.html`, `verificar.css`, `verificar.js`):** es el destino del enlace y del QR de la carátula (`https://samicert.ecomindsetgo.com/verificar.html?consulta=CERT-AAAA-XXXXXXXXXXXX`). No requiere iniciar sesión. Muestra código, fecha y hora, certificador, folios certificados y estado (con aviso si fue recertificación), y permite subir el PDF para comparar su SHA-256 con el registrado (el archivo se procesa en el navegador y no se envía a ningún servidor). No muestra correo del certificador ni nombre del archivo original.
+- **Compatibilidad:** los PDF ya emitidos con enlace `/?consulta=ID` siguen funcionando: `index.html` redirige esos enlaces a `verificar.html`.
+- **Reglas de Firestore (`firestore.rules`):** `certificaciones` ahora permite `get` público (un registro a la vez, conociendo su código de 12 caracteres aleatorios) y deja `list` solo para certificadores y administrador. **Deben publicarse en Firebase Console → Firestore → Reglas**; sin ese paso la página pública mostrará "servicio de consulta no habilitado".
+- **QR sin depender de un CDN:** se incluye `qrcode.js` (qrcode-generator 1.4.4, licencia MIT) junto a los demás archivos y `index.html` lo carga localmente, evitando el error "qrcode is not defined" cuando la red institucional bloquea cdnjs.
+
 ## Limpieza de pruebas
 Antes de eliminar registros de prueba:
 1. Generar un respaldo.
@@ -64,9 +71,11 @@ El sistema calcula SHA-256 sobre los bytes exactos del PDF final después de apl
 - `storage.rules` — seguridad de Firebase Storage. Ya no se usa para subir PDFs certificados (ver v2.2.0); se conserva solo para permitir a Administración borrar respaldos antiguos de versiones previas del sistema, si existieran.
 - `sello-jorge.png` — sello del certificador Jorge.
 - `sello-roberto.png` — sello del certificador Roberto.
-- `logo-institucional.png` — **opcional**. Si se publica un archivo con este nombre exacto junto a los demás, la carátula del PDF final lo usa como logo institucional; si no existe, se dibuja un marcador con las iniciales "PJ".
+- `logo-institucional.png` — logo institucional de la carátula del PDF final y de la página pública (acepta PNG o JPEG, aunque conserve la extensión .png). Si no existe o no se puede leer, la carátula dibuja un marcador con las iniciales "PJ".
+- `verificar.html`, `verificar.css`, `verificar.js` — página pública de consulta de certificaciones (destino del enlace y QR).
+- `qrcode.js` — librería local para generar el QR de la carátula.
 
-No requiere build ni bundler: los cuatro archivos (`index.html`, `style.css`, `app.js`, `firebase-config.js`) deben publicarse juntos, en la misma carpeta, tal como están.
+No requiere build ni bundler: todos los archivos de la carpeta (`index.html`, `style.css`, `app.js`, `firebase-config.js`, `qrcode.js`, `verificar.*`, logo y sellos) deben publicarse juntos, en la misma carpeta, tal como están.
 
 
 ## Corrección v2.0.1

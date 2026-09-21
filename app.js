@@ -1010,11 +1010,20 @@ function envolverTexto(texto, fuente, size, maxAncho) {
 
 async function obtenerLogoInstitucional(pdfDoc) {
   try {
-    const resp = await fetch("./logo-institucional.png");
+    // cache: "no-cache" evita usar una versión antigua del logo guardada por el navegador
+    const resp = await fetch("./logo-institucional.png", { cache: "no-cache" });
     if (!resp.ok) throw new Error("sin logo institucional publicado");
-    const bytes = await resp.arrayBuffer();
-    return await pdfDoc.embedPng(bytes);
+    const bytes = new Uint8Array(await resp.arrayBuffer());
+
+    // Se detecta el formato real por los primeros bytes del archivo y no por su extensión:
+    // un JPEG guardado con nombre ".png" hacía fallar embedPng y se caía al marcador "PJ".
+    const esPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47;
+    const esJpg = bytes[0] === 0xFF && bytes[1] === 0xD8;
+    if (esPng) return await pdfDoc.embedPng(bytes);
+    if (esJpg) return await pdfDoc.embedJpg(bytes);
+    throw new Error("formato de logo no reconocido (se esperaba PNG o JPG)");
   } catch (e) {
+    console.error("No se pudo incluir el logo institucional en la carátula:", e);
     return null;
   }
 }
@@ -1036,12 +1045,23 @@ async function crearPaginaCaratula(pdfDoc, resumen) {
   let y = height - 58;
 
   const logo = await obtenerLogoInstitucional(pdfDoc);
-  const logoAncho = 96, logoAlto = 64;
   if (logo) {
+    // El logo institucional ya incluye la leyenda "Poder Judicial del Perú",
+    // por lo que no se repite el nombre de la institución debajo.
+    const logoAncho = 150, logoAlto = 112;
     const escala = Math.min(logoAncho / logo.width, logoAlto / logo.height);
     const wLogo = logo.width * escala, hLogo = logo.height * escala;
     pagina.drawImage(logo, { x: width / 2 - wLogo / 2, y: y - hLogo, width: wLogo, height: hLogo });
+    y -= hLogo + 16;
+
+    pagina.drawText(resumen.organo, {
+      x: width / 2 - fTexto.widthOfTextAtSize(resumen.organo, 9.5) / 2,
+      y, size: 9.5, font: fTexto, color: gris
+    });
+    y -= 34;
   } else {
+    // Sin logo publicado (o ilegible): marcador "PJ" + nombre de la institución
+    const logoAncho = 96, logoAlto = 64;
     pagina.drawRectangle({
       x: width / 2 - logoAncho / 2, y: y - logoAlto, width: logoAncho, height: logoAlto,
       borderColor: gris, borderWidth: 1
@@ -1051,19 +1071,19 @@ async function crearPaginaCaratula(pdfDoc, resumen) {
       x: width / 2 - fTitulo.widthOfTextAtSize(marca, 22) / 2,
       y: y - logoAlto / 2 - 8, size: 22, font: fTitulo, color: azul
     });
-  }
-  y -= logoAlto + 18;
+    y -= logoAlto + 18;
 
-  pagina.drawText(resumen.institucion, {
-    x: width / 2 - fTitulo.widthOfTextAtSize(resumen.institucion, 13) / 2,
-    y, size: 13, font: fTitulo, color: azul
-  });
-  y -= 17;
-  pagina.drawText(resumen.organo, {
-    x: width / 2 - fTexto.widthOfTextAtSize(resumen.organo, 9.5) / 2,
-    y, size: 9.5, font: fTexto, color: gris
-  });
-  y -= 36;
+    pagina.drawText(resumen.institucion, {
+      x: width / 2 - fTitulo.widthOfTextAtSize(resumen.institucion, 13) / 2,
+      y, size: 13, font: fTitulo, color: azul
+    });
+    y -= 17;
+    pagina.drawText(resumen.organo, {
+      x: width / 2 - fTexto.widthOfTextAtSize(resumen.organo, 9.5) / 2,
+      y, size: 9.5, font: fTexto, color: gris
+    });
+    y -= 36;
+  }
 
   ["CONSTANCIA DE CERTIFICACIÓN", "DE COPIAS"].forEach(linea => {
     pagina.drawText(linea, {
@@ -1112,9 +1132,13 @@ async function crearPaginaCaratula(pdfDoc, resumen) {
   }
   y -= 6;
 
+  // El enlace es largo: se reduce el tamaño de letra solo si no cabe en la hoja
+  let tamUrl = 10.5;
+  const anchoUrl = fTitulo.widthOfTextAtSize(resumen.consultaUrl, tamUrl);
+  if (anchoUrl > width - 80) tamUrl = tamUrl * (width - 80) / anchoUrl;
   pagina.drawText(resumen.consultaUrl, {
-    x: width / 2 - fTitulo.widthOfTextAtSize(resumen.consultaUrl, 10.5) / 2,
-    y, size: 10.5, font: fTitulo, color: rgb(0.09, 0.34, 0.6)
+    x: width / 2 - fTitulo.widthOfTextAtSize(resumen.consultaUrl, tamUrl) / 2,
+    y, size: tamUrl, font: fTitulo, color: rgb(0.09, 0.34, 0.6)
   });
   y -= 28;
 
@@ -1268,7 +1292,7 @@ async function aplicarSelloAUnPdf(file) {
     certId,
     totalPaginas: paginas.length,
     totalCertificadas,
-    consultaUrl: `https://samicert.ecomindsetgo.com/?consulta=${certId}`
+    consultaUrl: `https://samicert.ecomindsetgo.com/verificar.html?consulta=${certId}`
   });
 
   return {
