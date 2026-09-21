@@ -1314,35 +1314,62 @@ function nombreConSufijo(nombre) {
     : nombre.slice(0,idx) + "[F]" + nombre.slice(idx);
 }
 
-async function guardarResultado(bytesSalida,nombre,handleDestino) {
-  const blob = new Blob([bytesSalida], { type: "application/pdf" });
+async function guardarResultado(bytesSalida, nombre, handleDestino, archivoFuente = null) {
+  // El ArrayBuffer leído del <input type=file> es la fuente de verdad del PDF firmado.
+  // No dependemos del objeto File para escribir en disco: algunos navegadores
+  // pueden exponer el File correctamente pero fallar al transferirlo al stream.
+  const bytesFirmados = bytesSalida instanceof ArrayBuffer
+    ? new Uint8Array(bytesSalida)
+    : new Uint8Array(bytesSalida);
 
-  // Cuando el usuario eligió una ubicación mediante showSaveFilePicker,
-  // guardamos de forma explícita y VERIFICAMOS el archivo físico antes de
-  // considerar terminada la operación. Esto evita falsos positivos cuando
-  // Windows/Chrome no termina de escribir el archivo.
+  const blob = archivoFuente instanceof Blob && archivoFuente.size === bytesFirmados.byteLength
+    ? archivoFuente
+    : new Blob([bytesFirmados], { type: "application/pdf" });
+
+  const bytesEsperados = bytesFirmados;
+  const tamanoEsperado = bytesEsperados.byteLength;
+
+  // El PDF debe comenzar con la firma binaria %PDF-. Si no es así, no permitimos
+  // que el archivo se considere certificado.
+  const cabecera = new TextDecoder().decode(bytesEsperados.slice(0, 5));
+  if (cabecera !== "%PDF-") {
+    throw new Error("El archivo firmado no tiene una cabecera PDF válida (%PDF-). No se guardó como PDF certificado.");
+  }
+
   if (handleDestino) {
-    const writable = await handleDestino.createWritable();
+    let writable = null;
     try {
-      await writable.write(blob);
-    } finally {
+      writable = await handleDestino.createWritable({ keepExistingData: false });
+      // Escritura binaria explícita. Evita que un Blob/File sea interpretado
+      // incorrectamente por el stream y garantiza que se escriban todos los bytes.
+      await writable.write(bytesEsperados);
+      await writable.truncate(tamanoEsperado);
       await writable.close();
+      writable = null;
+    } catch (e) {
+      try { if (writable) await writable.abort(); } catch (_) {}
+      throw new Error(`Windows/Chrome no pudo completar la escritura del PDF: ${e.message || e}`);
     }
 
+    // Volvemos a leer el archivo físico desde el handle, no el Blob en memoria.
+    // Esto confirma que el archivo realmente quedó en la ruta elegida.
     const archivoGuardado = await handleDestino.getFile();
-    if (!archivoGuardado || archivoGuardado.size !== bytesSalida.byteLength) {
+    if (!archivoGuardado || archivoGuardado.size !== tamanoEsperado) {
       throw new Error(
-        `El archivo no se guardó completamente. Tamaño esperado: ${bytesSalida.byteLength.toLocaleString()} bytes; tamaño encontrado: ${archivoGuardado?.size ?? 0} bytes.`
+        `El PDF quedó incompleto. Tamaño esperado: ${tamanoEsperado.toLocaleString()} bytes; tamaño encontrado: ${(archivoGuardado?.size ?? 0).toLocaleString()} bytes.`
       );
     }
 
-    // Comprobación adicional: calculamos la huella del archivo ya guardado
-    // y la comparamos con la huella de los bytes que SAMICERT intentó guardar.
     const bytesVerificados = await archivoGuardado.arrayBuffer();
+    const cabeceraGuardada = new TextDecoder().decode(new Uint8Array(bytesVerificados).slice(0, 5));
+    if (cabeceraGuardada !== "%PDF-") {
+      throw new Error("El archivo creado en la carpeta seleccionada no contiene un PDF válido.");
+    }
+
     const shaGuardado = await calcularSHA256(bytesVerificados);
-    const shaEsperado = await calcularSHA256(bytesSalida);
+    const shaEsperado = await calcularSHA256(bytesEsperados);
     if (shaGuardado !== shaEsperado) {
-      throw new Error("El PDF guardado no coincide exactamente con el PDF firmado generado por SAMICERT.");
+      throw new Error("El PDF guardado no coincide byte por byte con el PDF firmado seleccionado.");
     }
 
     return {
@@ -1352,7 +1379,8 @@ async function guardarResultado(bytesSalida,nombre,handleDestino) {
       file: archivoGuardado,
       blob: new Blob([bytesVerificados], { type: "application/pdf" }),
       sha256: shaGuardado,
-      nombre: archivoGuardado.name || nombre
+      nombre: archivoGuardado.name || nombre,
+      tamano: archivoGuardado.size
     };
   }
 
@@ -1371,8 +1399,9 @@ async function guardarResultado(bytesSalida,nombre,handleDestino) {
     handle: null,
     file: null,
     blob,
-    sha256: await calcularSHA256(bytesSalida),
-    nombre
+    sha256: await calcularSHA256(bytesEsperados),
+    nombre,
+    tamano: blob.size
   };
 }
 
@@ -1397,7 +1426,8 @@ function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, fireba
     <div style="margin-top:7px;font-size:12px;line-height:1.5">
       <strong>Archivo:</strong> ${nombreSeguro}<br>
       <strong>ID:</strong> ${escapeHtml(idFinal)}<br>
-      <strong>SHA-256:</strong> <span style="word-break:break-all">${escapeHtml(resultado.sha256 || "")}</span><br>
+      <strong>Tamaño:</strong> ${Number(resultado.tamano || 0).toLocaleString()} bytes<br>
+       <strong>SHA-256:</strong> <span style="word-break:break-all">${escapeHtml(resultado.sha256 || "")}</span><br>
       ${resultado.verificado ? "✓ Se verificó el tamaño y la huella del archivo después de guardarlo." : ""}
     </div>
     ${abrir}
@@ -1618,7 +1648,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       firmaDigitalTipo: "FIRMA ONPE",
       firmadoEnSAMICERT: serverTimestamp(),
       creadoEn: serverTimestamp(),
-      version: 12,
+      version: 13,
       estado: "certificado"
     };
 
@@ -1650,7 +1680,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       }
     }
 
-    const resultadoGuardado = await guardarResultado(bytesFirmados, nombreFinal, handleDestino);
+    const resultadoGuardado = await guardarResultado(bytesFirmados, nombreFinal, handleDestino, pdfFirmadoSeleccionado);
 
     const idFinal = procesoFirmaPendiente.id;
     const eraRecert = procesoFirmaPendiente.esRecertificacion;
