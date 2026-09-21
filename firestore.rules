@@ -41,7 +41,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Bandeja de documentos generados por los certificadores y pendientes de firma.
+    // Bandeja de documentos generados por los certificadores y pendientes de
+    // firma. Desde que se trabaja con una carpeta compartida, el documento
+    // en pendientesFirma solo guarda METADATOS: el certificador guarda el
+    // PDF [SF] directamente en disco (carpeta compartida) y Mesa de Partes
+    // lo ubica y firma desde ahí, ya no se descarga desde la app.
     match /pendientesFirma/{pendienteId} {
       allow read: if esAdministrador() || esCertificador() || esMesaPartes();
 
@@ -55,9 +59,13 @@ service cloud.firestore {
 
       allow delete: if esAdministrador() || esMesaPartes();
 
+      // Ya no se archiva el PDF provisional en Firestore (viaja por la
+      // carpeta compartida), así que no se permiten nuevos chunks aquí.
+      // Se conserva el acceso de lectura/borrado por compatibilidad con
+      // registros antiguos que sí llegaron a archivar chunks.
       match /pdfChunks/{chunkId} {
         allow read: if esAdministrador() || esCertificador() || esMesaPartes();
-        allow create: if esCertificador();
+        allow create: if false;
         allow update: if false;
         allow delete: if esAdministrador() || esMesaPartes();
       }

@@ -93,61 +93,13 @@ function esUsuarioMesaPartes(user = usuarioActual) {
   return !!user && (user.email || "").toLowerCase() === MESA_PARTES_EMAIL;
 }
 
-async function archivarPdfPendiente(pendienteId, bytesProvisionales) {
-  if (!bytesProvisionales || bytesProvisionales.length > PDF_ARCHIVO_MAX_BYTES) {
-    return { archivado: false, totalChunks: 0 };
-  }
-  try {
-    const total = Math.ceil(bytesProvisionales.length / PDF_ARCHIVO_CHUNK_BYTES);
-    for (let i = 0; i < total; i++) {
-      const trozo = bytesProvisionales.subarray(
-        i * PDF_ARCHIVO_CHUNK_BYTES,
-        (i + 1) * PDF_ARCHIVO_CHUNK_BYTES
-      );
-      await setDoc(doc(db, "pendientesFirma", pendienteId, "pdfChunks", String(i)), {
-        indice: i,
-        datos: uint8ToBase64(trozo)
-      });
-    }
-    return { archivado: true, totalChunks: total };
-  } catch (err) {
-    console.error("No se pudo archivar el PDF pendiente:", err);
-    return { archivado: false, totalChunks: 0 };
-  }
-}
-
-async function obtenerPdfPendienteBytes(pendienteId) {
-  const snap = await getDocs(collection(db, "pendientesFirma", pendienteId, "pdfChunks"));
-  if (snap.empty) {
-    throw new Error("No se encontraron los datos del PDF pendiente para firma.");
-  }
-  const trozos = snap.docs
-    .map(d => d.data())
-    .sort((a, b) => a.indice - b.indice)
-    .map(d => base64ToUint8(d.datos));
-  const totalBytes = trozos.reduce((suma, t) => suma + t.length, 0);
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const t of trozos) {
-    bytes.set(t, offset);
-    offset += t.length;
-  }
-  return bytes;
-}
-
-async function descargarPdfPendiente(pendienteId, nombreSugerido) {
-  const bytes = await obtenerPdfPendienteBytes(pendienteId);
-  const blob = new Blob([bytes], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = nombreSugerido || `${pendienteId}[SF].pdf`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
-}
-
+// NOTA v14 (Mesa de Partes por carpeta compartida): el PDF provisional
+// [SF] generado por el certificador YA NO se archiva en Firestore ni se
+// descarga desde la app. El certificador lo guarda directamente (mediante
+// el selector de guardado del navegador) en la carpeta compartida con
+// Mesa de Partes, y Mesa de Partes lo firma con Firma ONPE desde ahí.
+// Se conserva eliminarPdfPendiente por compatibilidad con registros
+// antiguos que sí llegaron a archivar chunks en pendientesFirma/pdfChunks.
 async function eliminarPdfPendiente(pendienteId, totalChunks = 0) {
   if (!totalChunks) return;
   for (let i = 0; i < totalChunks; i++) {
@@ -1624,21 +1576,32 @@ btnAplicar.addEventListener("click", async () => {
     renderLista();
 
     // El certificador genera el PDF provisional, pero NO firma ni registra
-    // la certificación definitiva. El archivo se entrega a Mesa de Partes
-    // mediante Firestore para mantener trazabilidad entre ambos roles.
+    // la certificación definitiva. Como se trabaja sobre una carpeta
+    // compartida con Mesa de Partes, el PDF [SF] se guarda directamente en
+    // disco (eligiendo la carpeta compartida en el selector de guardado)
+    // en vez de archivarse en Firestore; solo se guardan sus metadatos.
     const resultado = await aplicarSelloAUnPdf(archivoSeleccionado.file);
     const sha256PreFirma = await calcularSHA256(resultado.bytesSalida);
-
     const pendienteId = resultado.meta.id;
-    const archivoPdf = await archivarPdfPendiente(pendienteId, resultado.bytesSalida);
 
-    if (!archivoPdf.archivado) {
-      throw new Error(
-        resultado.bytesSalida.length > PDF_ARCHIVO_MAX_BYTES
-          ? "El PDF provisional supera el tamaño máximo permitido para ser entregado a Mesa de Partes."
-          : "No fue posible almacenar el PDF provisional para Mesa de Partes."
-      );
+    let handleDestino = null;
+    if ("showSaveFilePicker" in window) {
+      try {
+        handleDestino = await window.showSaveFilePicker({
+          suggestedName: nombreProvisional,
+          types: [{ description: "Documento PDF", accept: { "application/pdf": [".pdf"] } }]
+        });
+      } catch (err) {
+        if (err.name === "AbortError") {
+          throw new Error("Se canceló la ubicación de guardado. El documento no fue entregado a Mesa de Partes.");
+        }
+        throw err;
+      }
     }
+
+    const resultadoGuardado = await guardarResultado(
+      resultado.bytesSalida, nombreProvisional, handleDestino, null
+    );
 
     const pendiente = {
       id: pendienteId,
@@ -1646,7 +1609,7 @@ btnAplicar.addEventListener("click", async () => {
       fecha: resultado.meta.fecha,
       hora: resultado.meta.hora,
       archivoOriginal: resultado.meta.archivoOriginal,
-      archivoProvisionalNombre: nombreProvisional,
+      archivoProvisionalNombre: resultadoGuardado.nombre || nombreProvisional,
       paginasCertificadas: resultado.meta.paginasCertificadas,
       totalPaginas: resultado.meta.totalPaginas,
       sha256PreFirma,
@@ -1659,8 +1622,8 @@ btnAplicar.addEventListener("click", async () => {
       certificadorEmail: usuarioActual.email || "",
       zonaHoraria: "America/Lima",
       selloArchivo: obtenerUsuarioAutorizado(usuarioActual)?.sello.replace("./", "") || "",
-      pdfArchivado: true,
-      pdfChunksTotal: archivoPdf.totalChunks,
+      pdfArchivado: false,
+      pdfChunksTotal: 0,
       pdfBytesTotal: resultado.bytesSalida.length,
       creadoEn: serverTimestamp(),
       version: 14
@@ -1674,7 +1637,7 @@ btnAplicar.addEventListener("click", async () => {
 
     if (panelFirma) panelFirma.classList.add("oculto");
     mostrarEstado(
-      `✓ Documento ${pendienteId} enviado a Mesa de Partes para firma digital. El certificador no registra la certificación definitiva.`,
+      `✓ Documento ${pendienteId} guardado en la carpeta compartida (${resultadoGuardado.nombre}) y enviado a Mesa de Partes para firma digital. El certificador no registra la certificación definitiva.`,
       "ok"
     );
   } catch (err) {
@@ -1739,35 +1702,17 @@ async function cargarPendientesFirma() {
             ${escapeHtml(r.certificadorNombre || r.certificadorEmail || "")} ·
             ${escapeHtml((r.paginasCertificadas || []).length)} página(s)
           </div>
+          <div class="history-meta" style="margin-top:2px">
+            Archivo en carpeta compartida: <strong>${escapeHtml(r.archivoProvisionalNombre || (r.id + "[SF].pdf"))}</strong>
+          </div>
         </div>
         <div class="firma-pendiente-actions">
-          <button type="button" class="btn-small btn-icon btn-descargar-pendiente"
-                  data-id="${escapeHtml(r.id)}"
-                  data-nombre="${escapeHtml(r.archivoProvisionalNombre || (r.id + "[SF].pdf"))}">
-            ${ICONOS.descargar} Descargar [SF]
-          </button>
           <button type="button" class="btn-green btn-small btn-iniciar-firma" data-id="${escapeHtml(r.id)}">
             Firmar y registrar
           </button>
         </div>
       </div>
     `).join("");
-
-    contenedor.querySelectorAll(".btn-descargar-pendiente").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        btn.disabled = true;
-        const texto = btn.innerHTML;
-        btn.textContent = "Descargando…";
-        try {
-          await descargarPdfPendiente(btn.dataset.id, btn.dataset.nombre);
-        } catch (err) {
-          alert("No se pudo descargar el PDF provisional: " + (err.message || ""));
-        } finally {
-          btn.disabled = false;
-          btn.innerHTML = texto;
-        }
-      });
-    });
 
     contenedor.querySelectorAll(".btn-iniciar-firma").forEach(btn => {
       btn.addEventListener("click", () => iniciarFirmaEnMesa(btn.dataset.id));
@@ -1856,7 +1801,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
     if (!identidadConservada) {
       throw new Error(
         "El PDF firmado no contiene el identificador de esta certificación en su primera página. " +
-        "Firme el PDF provisional descargado desde SAMICERT y vuelva a importarlo."
+        "Firme el PDF provisional [SF] ubicado en la carpeta compartida y vuelva a importarlo aquí."
       );
     }
 
@@ -2480,7 +2425,7 @@ async function cargarPerfil(user) {
   if (!snap.exists()) {
     const perfilNuevo = {
       uid:user.uid,
-      nombre:autorizado?.nombre || user.displayName || "Administrador",
+      nombre:autorizado?.nombre || user.displayName || (esAdmin ? "Administrador" : (esMesa ? "Mesa de Partes" : "Usuario autorizado")),
       correo:autorizado?.correo || user.email || "",
       rol:esAdmin ? "administrador" : (esMesa ? "mesa_partes" : "certificador"),
       creadoEn:serverTimestamp()
@@ -2496,7 +2441,7 @@ async function cargarPerfil(user) {
   }
 
   esAdministradorActual = esAdmin;
-  $("usuarioNombre").textContent = perfilActual.nombre || (esAdmin ? "Administrador" : "Usuario autorizado");
+  $("usuarioNombre").textContent = perfilActual.nombre || (esAdmin ? "Administrador" : (esMesa ? "Mesa de Partes" : "Usuario autorizado"));
   $("usuarioEmail").textContent = perfilActual.correo || user.email || "";
   actualizarAccesoAdministrador();
 }
