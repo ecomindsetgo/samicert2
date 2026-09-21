@@ -1604,7 +1604,11 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
     // Firma ONPE reescribe los metadatos internos del PDF.
     if (window.pdfjsLib) {
       try {
-        const loadingTask = pdfjsLib.getDocument({ data: bytesFirmados });
+        // PDF.js puede transferir (y por tanto "desacoplar") el ArrayBuffer
+        // recibido. Nunca le entregamos el buffer original porque después
+        // necesitamos calcular SHA-256 y guardarlo en disco.
+        const bytesParaPdfJs = new Uint8Array(bytesFirmados);
+        const loadingTask = pdfjsLib.getDocument({ data: bytesParaPdfJs });
         const pdfVerificacion = await loadingTask.promise;
         const primeraPagina = await pdfVerificacion.getPage(1);
         const contenido = await primeraPagina.getTextContent();
