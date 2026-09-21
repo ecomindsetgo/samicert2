@@ -44,6 +44,14 @@ Para respaldos automáticos programados en la nube (por ejemplo, diarios de la b
 - Los registros de Firestore siguen guardando el SHA-256 del documento, por lo que la verificación de integridad contra el PDF que tenga en mano el usuario sigue funcionando igual.
 - El botón "Eliminar seleccionados" de Administración sigue intentando borrar, por compatibilidad, cualquier PDF que haya quedado respaldado en Storage por certificaciones hechas con la versión 2.1.0; si no existe, simplemente lo ignora.
 
+## Versión 2.4.0
+- **Vuelve el respaldo del PDF final en el sistema, sin costo.** En vez de subirlo a Firebase Storage (que desde fines de 2024 exige activar el plan de pago Blaze solo para habilitarse, aunque el uso real esté dentro de la capa gratuita), el PDF certificado se guarda como texto Base64 fragmentado en la subcolección `certificaciones/{id}/archivo/{n}` de Firestore, que sí funciona en el plan gratuito Spark.
+- Documentos de hasta ~20 MB quedan respaldados automáticamente; por encima de ese límite, la certificación se completa igual pero el PDF queda solo en el equipo del certificador (se avisa en pantalla).
+- En **Historial** aparece un botón **"Ver PDF"** por cada registro, que reconstruye el archivo a partir de los fragmentos y lo abre en una pestaña nueva. Solo lo pueden usar certificadores y el administrador (no es de consulta pública, a diferencia del registro por ID/hash).
+- Al eliminar registros desde Administración, ahora también se borran los fragmentos respaldados en Firestore (además de, por compatibilidad, cualquier resto en Storage de la versión 2.1.0).
+- **`firestore.rules`** agrega reglas para la subcolección `archivo`: deben publicarse en Firebase Console → Firestore → Reglas para que el respaldo y "Ver PDF" funcionen.
+- `storage.rules` y Firebase Storage ya no son necesarios para esta función; se mantienen solo por la compatibilidad mencionada arriba.
+
 ## Versión 2.3.0
 - **Logo institucional en la primera hoja:** `logo-institucional.png` es en realidad una imagen JPEG con extensión ".png". `pdf-lib` intentaba leerla como PNG, fallaba y la carátula caía en silencio al marcador "PJ". Ahora `app.js` detecta el formato real por los primeros bytes del archivo (PNG o JPEG) y la incrusta correctamente. Como el logo ya trae la leyenda "Poder Judicial del Perú", la carátula no repite el nombre de la institución debajo de él.
 - **Página pública de consulta (`verificar.html`, `verificar.css`, `verificar.js`):** es el destino del enlace y del QR de la carátula (`https://samicert.ecomindsetgo.com/verificar.html?consulta=CERT-AAAA-XXXXXXXXXXXX`). No requiere iniciar sesión. Muestra código, fecha y hora, certificador, folios certificados y estado (con aviso si fue recertificación), y permite subir el PDF para comparar su SHA-256 con el registrado (el archivo se procesa en el navegador y no se envía a ningún servidor). No muestra correo del certificador ni nombre del archivo original.
