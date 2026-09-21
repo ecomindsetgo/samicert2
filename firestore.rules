@@ -57,7 +57,13 @@ service cloud.firestore {
         && resource.data.estado == "pendiente-firma"
         && request.resource.data.estado == "pendiente-firma";
 
-      allow delete: if esAdministrador() || esMesaPartes();
+      // El certificador puede cancelar (eliminar) su propio documento
+      // mientras siga "pendiente-firma", por ejemplo si envió el archivo
+      // equivocado a Mesa de Partes.
+      allow delete: if esAdministrador() || esMesaPartes()
+        || (esCertificador()
+            && resource.data.certificadorUid == request.auth.uid
+            && resource.data.estado == "pendiente-firma");
 
       // Ya no se archiva el PDF provisional en Firestore (viaja por la
       // carpeta compartida), así que no se permiten nuevos chunks aquí.

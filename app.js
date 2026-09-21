@@ -1556,6 +1556,7 @@ btnAplicar.addEventListener("click", async () => {
       `✓ Documento ${pendienteId} guardado en la carpeta compartida (${resultadoGuardado.nombre}) y enviado a Mesa de Partes para firma digital. El certificador no registra la certificación definitiva.`,
       "ok"
     );
+    cargarMisPendientesFirma();
   } catch (err) {
     console.error(err);
     archivoSeleccionado.estado = "error";
@@ -1585,6 +1586,127 @@ inputPdfFirmado?.addEventListener("change", () => {
 });
 
 let pendienteFirmaActual = null;
+
+// Permite al certificador ver los documentos que ÉL envió a Mesa de Partes
+// y que siguen "pendiente-firma", y cancelarlos si se equivocó de archivo
+// (por ejemplo, si generó el [SF] de un PDF que no correspondía).
+async function cargarMisPendientesFirma() {
+  if (!usuarioActual || esUsuarioMesaPartes()) return;
+  const contenedor = $("misPendientesLista");
+  if (!contenedor) return;
+
+  contenedor.innerHTML = '<div class="empty">Cargando…</div>';
+
+  try {
+    const snap = await getDocs(collection(db, "pendientesFirma"));
+    const pendientes = snap.docs
+      .map(d => ({...d.data(), id:d.id}))
+      .filter(r => r.estado === "pendiente-firma" && r.certificadorUid === usuarioActual.uid)
+      .sort((a,b) => fechaRegistroEnMs(b) - fechaRegistroEnMs(a));
+
+    if (!pendientes.length) {
+      contenedor.innerHTML = '<div class="empty">No tiene documentos pendientes de firma en este momento.</div>';
+      return;
+    }
+
+    contenedor.innerHTML = pendientes.map(r => `
+      <div class="firma-pendiente-item">
+        <div class="firma-pendiente-id">${escapeHtml(r.id)}</div>
+        <div>
+          <div class="history-file">${escapeHtml(r.archivoOriginal || "Documento PDF")}</div>
+          <div class="history-meta">
+            ${escapeHtml(r.fecha || "")} ${escapeHtml(r.hora || "")} ·
+            ${escapeHtml((r.paginasCertificadas || []).length)} página(s)
+          </div>
+          <div class="history-meta" style="margin-top:2px">
+            Archivo en carpeta compartida: <strong>${escapeHtml(r.archivoProvisionalNombre || (r.id + "[SF].pdf"))}</strong>
+          </div>
+        </div>
+        <div class="firma-pendiente-actions">
+          <button type="button" class="btn-gray btn-small btn-cancelar-pendiente" data-id="${escapeHtml(r.id)}">
+            Cancelar / eliminar
+          </button>
+        </div>
+      </div>
+    `).join("");
+
+    contenedor.querySelectorAll(".btn-cancelar-pendiente").forEach(btn => {
+      btn.addEventListener("click", () => cancelarMiPendienteFirma(btn.dataset.id));
+    });
+  } catch (err) {
+    console.error(err);
+    contenedor.innerHTML = `<div class="empty">No se pudo cargar la lista: ${escapeHtml(err.message || "")}</div>`;
+  }
+}
+
+async function cancelarMiPendienteFirma(id) {
+  if (!confirm(
+    `¿Cancelar el documento ${id}?\n\nYa no aparecerá en la bandeja de Mesa de Partes. Si lo necesita, deberá volver a generarlo desde "Certificar Documento".`
+  )) return;
+
+  try {
+    await deleteDoc(doc(db, "pendientesFirma", id));
+    mostrarEstado(`✓ Documento ${id} cancelado. Ya no está disponible para Mesa de Partes.`, "ok");
+    await cargarMisPendientesFirma();
+  } catch (err) {
+    console.error(err);
+    alert("No se pudo cancelar el documento: " + (err.message || ""));
+  }
+}
+
+// Documentos que Mesa de Partes ya firmó y registró (últimos primero).
+// Es un acceso rápido directamente en el módulo de firma; el historial
+// completo de TODAS las certificaciones sigue disponible en "Historial".
+const MIS_FIRMADOS_LIMITE = 15;
+
+async function cargarMisDocumentosFirmados() {
+  if (!usuarioActual || !esUsuarioMesaPartes()) return;
+  const contenedor = $("misFirmadosLista");
+  if (!contenedor) return;
+
+  contenedor.innerHTML = '<div class="empty">Cargando…</div>';
+
+  try {
+    const q = query(
+      collection(db, "certificaciones"),
+      where("firmanteUid", "==", usuarioActual.uid),
+      limit(200)
+    );
+    const snap = await getDocs(q);
+    const firmados = snap.docs
+      .map(d => ({...d.data(), id:d.id}))
+      .sort((a,b) => fechaRegistroEnMs(b) - fechaRegistroEnMs(a))
+      .slice(0, MIS_FIRMADOS_LIMITE);
+
+    if (!firmados.length) {
+      contenedor.innerHTML = '<div class="empty">Aún no ha firmado ningún documento.</div>';
+      return;
+    }
+
+    contenedor.innerHTML = firmados.map(r => `
+      <div class="firma-pendiente-item">
+        <div class="firma-pendiente-id">${escapeHtml(r.id)}</div>
+        <div>
+          <div class="history-file">${escapeHtml(r.archivoOriginal || "Documento PDF")}</div>
+          <div class="history-meta">
+            ${escapeHtml(formatoFechaRegistro(r))} ·
+            Certificador: ${escapeHtml(r.certificadorNombre || r.certificadorEmail || "")} ·
+            ${escapeHtml((r.paginasCertificadas || []).length)} página(s)
+          </div>
+          <div class="history-meta" style="margin-top:2px;word-break:break-all">
+            SHA-256: ${escapeHtml(r.sha256Final || r.sha256 || "")}
+          </div>
+        </div>
+        <div class="firma-pendiente-actions">
+          <span class="hist-firmado-badge">✓ Certificado</span>
+        </div>
+      </div>
+    `).join("");
+  } catch (err) {
+    console.error(err);
+    contenedor.innerHTML = `<div class="empty">No se pudo cargar la lista de firmados: ${escapeHtml(err.message || "")}</div>`;
+  }
+}
 
 async function cargarPendientesFirma() {
   if (!esUsuarioMesaPartes()) return;
@@ -1804,6 +1926,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
     if ($("panelFirmaMesa")) $("panelFirmaMesa").classList.add("oculto");
 
     await cargarPendientesFirma();
+    cargarMisDocumentosFirmados();
     mostrarResultadoGuardado(
       resultadoFinal,
       nombreFinal,
@@ -2266,7 +2389,8 @@ function mostrarPagina(nombre) {
 
   if (nombre === "historial") cargarHistorial();
   if (nombre === "administracion") cargarAdministracion();
-  if (nombre === "firmar") cargarPendientesFirma();
+  if (nombre === "firmar") { cargarPendientesFirma(); cargarMisDocumentosFirmados(); }
+  if (nombre === "certificar") cargarMisPendientesFirma();
   window.scrollTo({top:0,behavior:"smooth"});
 }
 
@@ -2481,6 +2605,7 @@ onAuthStateChanged(auth,async user => {
     } else if (esUsuarioMesaPartes()) {
       mostrarPagina("firmar");
       await cargarPendientesFirma();
+      cargarMisDocumentosFirmados();
     } else {
       mostrarPagina("inicio");
     }

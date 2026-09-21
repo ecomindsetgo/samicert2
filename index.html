@@ -171,6 +171,17 @@
           <p>Seleccione el PDF y las páginas que serán certificadas. La certificación se registra recién después de importar el PDF firmado digitalmente.</p>
         </div>
 
+        <div class="panel" id="panelMisPendientes">
+          <div class="panel-title">Mis documentos enviados a Mesa de Partes (pendientes de firma)</div>
+          <div class="panel-subtitle">
+            Si envió un documento por error, puede cancelarlo aquí mientras siga "pendiente de firma".
+            Una vez que Mesa de Partes lo firma y registra, ya no aparece en esta lista.
+          </div>
+          <div id="misPendientesLista" class="firma-pendientes-lista">
+            <div class="empty">Cargando…</div>
+          </div>
+        </div>
+
         <div class="panel">
           <div class="panel-title">Documento PDF</div>
           <div class="panel-subtitle">El sello correspondiente al usuario que inició sesión se aplica automáticamente.</div>
@@ -282,6 +293,16 @@
         </div>
 
         <div id="hashResultadoMesa" class="hash-resultado oculto"></div>
+
+        <div class="panel" id="panelMisFirmados">
+          <div class="panel-title">Documentos firmados recientemente</div>
+          <div class="panel-subtitle">
+            Certificaciones que usted ya firmó y registró. Para el listado completo de todas las certificaciones, use "Historial de Certificaciones".
+          </div>
+          <div id="misFirmadosLista" class="firma-pendientes-lista">
+            <div class="empty">Cargando…</div>
+          </div>
+        </div>
       </section>
 
       <section class="page" id="page-verificar">
