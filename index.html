@@ -6,7 +6,7 @@
 <title>SAMICERT — Sistema de Archivo y Manejo de Información para la Certificación de Documentos</title>
 
 <script>
-  // Los enlaces/QR de consulta ya emitidos apuntaban a "/?consulta=ID": se envían a la página pública.
+  
   (function () {
     var c = new URLSearchParams(window.location.search).get("consulta");
     if (c) window.location.replace("verificar.html?consulta=" + encodeURIComponent(c));
@@ -116,7 +116,7 @@
             <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h6l4 4v13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="m9.5 14.5 2 2 4-4.5"/></svg></div>
             <div>
               <h3>Certificar Documento</h3>
-              <p>Seleccione un PDF, elija las páginas y aplique el sello de certificación. El sistema genera automáticamente el identificador y registra la huella SHA-256.</p>
+              <p>Seleccione un PDF, elija las páginas, genere el documento para firma y luego importe el PDF firmado con Firma ONPE. El SHA-256 definitivo se calcula después de la firma.</p>
               <button class="btn-card" data-go="certificar">Ir a Certificar</button>
             </div>
           </div>
@@ -158,7 +158,7 @@
       <section class="page" id="page-certificar">
         <div class="section-head">
           <h2>Certificar Documento</h2>
-          <p>Seleccione el PDF y las páginas que serán certificadas.</p>
+          <p>Seleccione el PDF y las páginas que serán certificadas. La certificación se registra recién después de importar el PDF firmado digitalmente.</p>
         </div>
 
         <div class="panel">
@@ -214,8 +214,27 @@
           </div>
 
           <div class="actions">
-            <button class="btn-green" id="btnAplicar" disabled>Aplicar sello y guardar</button>
+            <button class="btn-green" id="btnAplicar" disabled>Generar documento para firma</button>
             <button class="btn-gray oculto" id="btnLimpiar">Quitar documento</button>
+          </div>
+
+          <div id="panelFirma" class="firma-panel oculto">
+            <div class="panel-title">Paso 2 · Importar PDF firmado digitalmente</div>
+            <div class="panel-subtitle">
+              El PDF provisional ya fue generado. Fírmelo con Firma ONPE y luego importe aquí el <strong>PDF firmado</strong>.
+              SAMICERT no registrará la certificación ni calculará el SHA-256 definitivo hasta recibir el PDF firmado.
+            </div>
+            <div class="firma-pasos">
+              <span>1. Descargar PDF provisional</span><span>→</span><span>2. Firmar con Firma ONPE</span><span>→</span><span>3. Importar PDF firmado</span>
+            </div>
+            <div class="verify-upload firma-upload">
+              <input type="file" id="inputPdfFirmado" accept="application/pdf,.pdf">
+              <div id="archivoPdfFirmadoNombre" class="verify-file-name oculto"></div>
+            </div>
+            <div class="actions firma-actions">
+              <button type="button" class="btn-green" id="btnRegistrarFirmado" disabled>Registrar certificación definitiva</button>
+              <button type="button" class="btn-gray" id="btnCancelarFirma">Cancelar proceso de firma</button>
+            </div>
           </div>
 
           <div id="hashResultado" class="hash-resultado oculto"></div>

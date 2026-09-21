@@ -16,7 +16,6 @@ const auth = getAuth(appFirebase);
 const db = getFirestore(appFirebase);
 const storage = getStorage(appFirebase);
 
-// ── Íconos SVG en línea (look profesional, reemplazan a los emojis/glifos) ──
 const ICONOS = {
   lupa: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.35-4.35"/></svg>',
   rotar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 3v5h-5"/></svg>',
@@ -49,9 +48,6 @@ const btnGuardarPassword = $("btnGuardarPassword");
 const btnLimpiarPassword = $("btnLimpiarPassword");
 const passwordMessage = $("passwordMessage");
 
-// Si se llegó desde un enlace/QR de consulta (?consulta=ID), se avisa en la
-// pantalla de acceso; tras iniciar sesión, onAuthStateChanged reabre esa
-// consulta automáticamente en la sección "Verificar Documento".
 const idConsultaInicial = new URLSearchParams(window.location.search).get("consulta");
 if (idConsultaInicial) {
   const parrafoLogin = document.querySelector(".login-card p");
@@ -67,6 +63,11 @@ const drop = $("drop");
 const btnAplicar = $("btnAplicar");
 const btnLimpiar = $("btnLimpiar");
 const lista = $("lista");
+const panelFirma = $("panelFirma");
+const inputPdfFirmado = $("inputPdfFirmado");
+const archivoPdfFirmadoNombre = $("archivoPdfFirmadoNombre");
+const btnRegistrarFirmado = $("btnRegistrarFirmado");
+const btnCancelarFirma = $("btnCancelarFirma");
 
 let archivoSeleccionado = null;
 let resultadoBlob = null;
@@ -77,6 +78,8 @@ let pdfVista = null;
 let usuarioActual = null;
 let perfilActual = null;
 let selloBytes = null;
+let procesoFirmaPendiente = null;
+let pdfFirmadoSeleccionado = null;
 
 const TAMANO_SELLO_PT = 90;
 const MARGEN_SELLO_PT = 3;
@@ -167,7 +170,6 @@ async function buscarCertificacionesPrevias(hashOrigen, nombreArchivo) {
     throw err;
   }
 
-  // Más recientes primero
   return Array.from(encontrados.values()).sort((a, b) => {
     const fa = `${a.registro.fecha || ""} ${a.registro.hora || ""}`;
     const fb = `${b.registro.fecha || ""} ${b.registro.hora || ""}`;
@@ -244,8 +246,6 @@ function mostrarAlertaDuplicado(coincidencias) {
   box.classList.remove("oculto");
 }
 
-/* Modal de confirmación: obliga a dejar constancia escrita del motivo antes
-   de permitir una segunda certificación sobre el mismo documento. */
 function confirmarRecertificacion(coincidencias, solapadas) {
   return new Promise(resolve => {
     const modal   = $("modalRecert");
@@ -761,8 +761,6 @@ async function seleccionarPdf(file) {
   renderLista();
   cargarVisorPaginas(file);
 
-  // Revisión de duplicados apenas se carga el archivo: el certificador se
-  // entera ANTES de invertir tiempo seleccionando páginas.
   const box = $("alertaDuplicado");
   if (box) {
     box.className = "alerta-duplicado alerta-info";
@@ -774,7 +772,6 @@ async function seleccionarPdf(file) {
     const bytesOrigen = await file.arrayBuffer();
     hashOrigenActual = await calcularSHA256(bytesOrigen);
 
-    // Si el usuario cambió de archivo mientras se calculaba, se descarta.
     if (!archivoSeleccionado || archivoSeleccionado.file !== file) return;
 
     duplicadosDetectados = await buscarCertificacionesPrevias(hashOrigenActual, file.name);
@@ -900,10 +897,6 @@ function pivoteParaRotar(centro, tamano, giroDeg) {
   return { x: centro.x - rx, y: centro.y - ry };
 }
 
-// Calcula dónde va a caer el sello (esquina/pivote/giro) SIN dibujar nada todavía.
-// Esto permite dibujar primero los textos (fecha/hora/código/folio) y recién
-// después la imagen del sello encima, para que el texto quede detrás de la
-// firma/imagen y no compitiendo visualmente con ella.
 function calcularPosicionSello(pagina, esquina, tamano, margen, rotacionFinal) {
   const centro = centroSelloEnCoordenadasPdf(
     pagina, esquina, tamano, margen, rotacionFinal
@@ -920,8 +913,6 @@ function calcularPosicionSello(pagina, esquina, tamano, margen, rotacionFinal) {
   };
 }
 
-// Dibuja la imagen del sello en la posición ya calculada. Se llama DESPUÉS de
-// dibujar los textos, así la imagen queda por delante (encima) de ellos.
 function dibujarImagenSello(pagina, imagen, posicion, tamano) {
   pagina.drawImage(imagen, {
     x: posicion.x,
@@ -932,9 +923,6 @@ function dibujarImagenSello(pagina, imagen, posicion, tamano) {
   });
 }
 
-// ── Utilidades para el código QR de la carátula (sin dependencias del DOM además del canvas) ──
-// Carga el emblema que va al centro del QR (logo-qr.png). Si no está o no se puede leer,
-// el QR se genera igual, sin emblema.
 async function cargarLogoParaQR() {
   try {
     const resp = await fetch("./logo-qr.png", { cache: "no-cache" });
@@ -1139,7 +1127,6 @@ async function crearPaginaCaratula(pdfDoc, resumen) {
   }
   y -= 6;
 
-  // El enlace es largo: se reduce el tamaño de letra solo si no cabe en la hoja
   let tamUrl = 10.5;
   const anchoUrl = fTitulo.widthOfTextAtSize(resumen.consultaUrl, tamUrl);
   if (anchoUrl > width - 80) tamUrl = tamUrl * (width - 80) / anchoUrl;
@@ -1235,7 +1222,6 @@ async function aplicarSelloAUnPdf(file) {
 
     if (!paginasSeleccionadas.has(n)) return;
 
-    // 1) Se calcula dónde va a caer el sello, pero todavía no se dibuja la imagen.
     const posSello = calcularPosicionSello(
       pagina, esquina, tamano, margen, rotacionFinal
     );
@@ -1265,8 +1251,7 @@ async function aplicarSelloAUnPdf(file) {
     const cosGiro = Math.cos(radGiro);
     const sinGiro = Math.sin(radGiro);
 
-    // 2) Se dibujan primero los textos (fecha, hora, código y folio): quedan
-    //    "detrás" porque la imagen del sello se dibuja recién después, encima.
+    
     textos.forEach(([texto, size], i) => {
       const ancho = fuente.widthOfTextAtSize(texto, size);
       const localX = tamano / 2 - ancho / 2;
@@ -1284,9 +1269,7 @@ async function aplicarSelloAUnPdf(file) {
       });
     });
 
-    // 3) Recién ahora se dibuja la imagen del sello, por encima del texto.
-    //    En las zonas transparentes del PNG (fuera de la firma/tinta) el
-    //    texto sigue siendo visible; donde el sello es opaco, lo tapa.
+    
     dibujarImagenSello(pagina, sellImage, posSello, tamano);
   });
 
@@ -1301,6 +1284,12 @@ async function aplicarSelloAUnPdf(file) {
     totalCertificadas,
     consultaUrl: `https://samicert.ecomindsetgo.com/verificar.html?consulta=${certId}`
   });
+
+  // Metadatos internos para que el PDF conserve su identidad durante el
+  // paso de firma externa. El SHA-256 definitivo NO se calcula aquí.
+  pdfDoc.setTitle(`SAMICERT ${certId}`);
+  pdfDoc.setSubject(`SAMICERT:${certId}`);
+  pdfDoc.setKeywords(["SAMICERT", certId, "PENDIENTE_FIRMA"]);
 
   return {
     bytesSalida: await pdfDoc.save(),
@@ -1325,9 +1314,7 @@ function nombreConSufijo(nombre) {
 async function guardarResultado(bytesSalida,nombre,handleDestino) {
   const blob = new Blob([bytesSalida],{type:"application/pdf"});
 
-  // Si ya se obtuvo un "handle" de showSaveFilePicker al inicio del clic
-  // (antes de las operaciones asíncronas de certificación), se usa aquí
-  // para escribir el archivo en la ubicación que el operador eligió.
+  
   if (handleDestino) {
     const writable = await handleDestino.createWritable();
     await writable.write(blob);
@@ -1335,8 +1322,7 @@ async function guardarResultado(bytesSalida,nombre,handleDestino) {
     return true;
   }
 
-  // Respaldo para navegadores sin File System Access API (Firefox, Safari):
-  // descarga clásica a la carpeta de descargas del navegador.
+  
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -1348,50 +1334,14 @@ async function guardarResultado(bytesSalida,nombre,handleDestino) {
   return true;
 }
 
-btnAplicar.addEventListener("click",async () => {
+btnAplicar.addEventListener("click", async () => {
   if (!archivoSeleccionado || !usuarioActual) return;
 
   btnAplicar.disabled = true;
+  const nombreProvisional = archivoSeleccionado.name.toLowerCase().endsWith(".pdf")
+    ? archivoSeleccionado.name.slice(0, -4) + "[PENDIENTE-FIRMA].pdf"
+    : archivoSeleccionado.name + "[PENDIENTE-FIRMA].pdf";
 
-  const nombreDestino = nombreConSufijo(archivoSeleccionado.name);
-
-  // ── Elegir ubicación de guardado ANTES de cualquier operación asíncrona ──
-  // showSaveFilePicker solo funciona mientras el navegador todavía reconoce
-  // el clic como un "user gesture" activo. Si se llama después de esperar
-  // el hash, la consulta a Firestore o el sellado del PDF, el navegador ya
-  // no lo considera parte del gesto y lo bloquea con:
-  // "Must be handling a user gesture to show a file picker."
-  // Por eso se pide aquí, de entrada, y se guarda el handle para escribir
-  // el archivo recién al final, cuando el PDF certificado esté listo.
-  let handleDestino = null;
-  if ("showSaveFilePicker" in window) {
-    try {
-      handleDestino = await window.showSaveFilePicker({
-        suggestedName: nombreDestino,
-        types: [{
-          description: "Documento PDF",
-          accept: { "application/pdf": [".pdf"] }
-        }]
-      });
-    } catch (err) {
-      btnAplicar.disabled = false;
-      if (err.name === "AbortError") {
-        // El operador cerró el selector de guardado sin elegir ubicación.
-        return;
-      }
-      console.error(err);
-      mostrarEstado(
-        "No se pudo abrir el selector de guardado. " + (err.message || ""),
-        "error"
-      );
-      return;
-    }
-  }
-
-  // ── Revalidación en el momento exacto de certificar ──────────────────
-  // No basta con la revisión hecha al cargar el archivo: entre ese momento
-  // y este pudo pasar mucho tiempo, o el otro certificador pudo haber
-  // registrado el mismo documento en paralelo.
   let datosRecert = { continuar: true, motivo: "" };
   try {
     if (!hashOrigenActual) {
@@ -1410,7 +1360,6 @@ btnAplicar.addEventListener("click",async () => {
       const solapeUnico = Array.from(new Set(solapadas)).sort((a,b)=>a-b);
 
       datosRecert = await confirmarRecertificacion(duplicadosDetectados, solapeUnico);
-
       if (!datosRecert.continuar) {
         btnAplicar.disabled = false;
         renderLista();
@@ -1437,69 +1386,207 @@ btnAplicar.addEventListener("click",async () => {
   renderLista();
 
   try {
+    // PASO B-1: generar el PDF provisional con sellos + carátula.
+    // Todavía NO se registra la certificación y todavía NO existe el SHA final.
     const resultado = await aplicarSelloAUnPdf(archivoSeleccionado.file);
-    const sha256 = await calcularSHA256(resultado.bytesSalida);
+    const sha256PreFirma = await calcularSHA256(resultado.bytesSalida);
 
-    // ── El PDF final NO se respalda en el sistema (Firebase Storage) ──────
-    // Por decisión operativa, el único ejemplar del PDF certificado queda
-    // en el equipo del certificador. El sistema solo conserva el registro
-    // (metadatos + SHA-256) en Firestore, para poder verificar integridad
-    // sin necesitar el archivo en sí.
-    const registro = {
+    procesoFirmaPendiente = {
       ...resultado.meta,
-      sha256,
+      bytesProvisionales: resultado.bytesSalida,
+      sha256PreFirma,
       sha256Origen: hashOrigenActual,
       esRecertificacion: duplicadosDetectados.length > 0,
       motivoRecertificacion: datosRecert.motivo || "",
       certificacionesPrevias: duplicadosDetectados.map(c => c.registro.id || c.docId),
-      certificadorUid:usuarioActual.uid,
-      certificadorNombre:perfilActual?.nombre || usuarioActual.displayName || usuarioActual.email || "Usuario autorizado",
-      certificadorEmail:usuarioActual.email || "",
-      zonaHoraria:"America/Lima",
-      selloArchivo:USUARIOS_AUTORIZADOS[usuarioActual.uid].sello.replace("./",""),
-      creadoEn:serverTimestamp(),
-      version:9,
-      estado:"certificado"
+      certificadorUid: usuarioActual.uid,
+      certificadorNombre: perfilActual?.nombre || usuarioActual.displayName || usuarioActual.email || "Usuario autorizado",
+      certificadorEmail: usuarioActual.email || "",
+      zonaHoraria: "America/Lima",
+      selloArchivo: USUARIOS_AUTORIZADOS[usuarioActual.uid].sello.replace("./", "")
     };
 
-    await setDoc(doc(db,"certificaciones",resultado.meta.id),registro);
-    await guardarResultado(resultado.bytesSalida,nombreDestino,handleDestino);
+    // El provisional se descarga para abrirlo y firmarlo con Firma ONPE.
+    await guardarResultado(resultado.bytesSalida, nombreProvisional, null);
 
-    limpiarArchivo();
+    panelFirma.classList.remove("oculto");
+    archivoPdfFirmadoNombre.classList.add("oculto");
+    archivoPdfFirmadoNombre.textContent = "";
+    btnRegistrarFirmado.disabled = true;
+    pdfFirmadoSeleccionado = null;
 
-    if (duplicadosDetectados.length) {
-      mostrarEstado(
-        "Recertificación registrada. Quedó constancia permanente del motivo y de los identificadores previos: " +
-        duplicadosDetectados.map(c => c.registro.id || c.docId).join(", ") + ". El PDF final quedó guardado únicamente en este equipo.",
-        "ok"
-      );
-    } else {
-      mostrarEstado(
-        "Certificación registrada correctamente. El identificador y SHA-256 fueron almacenados automáticamente. El PDF final quedó guardado únicamente en este equipo.",
-        "ok"
-      );
-    }
-    duplicadosDetectados = [];
-    hashOrigenActual = null;
+    archivoSeleccionado.estado = "pendiente-firma";
+    renderLista();
+    mostrarEstado(
+      "Documento provisional generado. Fírmelo con Firma ONPE y luego importe aquí el PDF firmado. SAMICERT aún no ha registrado la certificación definitiva.",
+      "ok"
+    );
   } catch (err) {
     console.error(err);
-
-    if (err.name === "AbortError") {
-      archivoSeleccionado.estado = "pendiente";
-    } else {
-      archivoSeleccionado.estado = "error";
-      mostrarEstado(
-        "No se pudo completar la certificación. " + (err.message || ""),
-        "error"
-      );
-    }
-
+    archivoSeleccionado.estado = "error";
+    mostrarEstado(
+      "No se pudo generar el documento provisional. " + (err.message || ""),
+      "error"
+    );
     renderLista();
   } finally {
     btnAplicar.disabled = false;
     renderLista();
   }
 });
+
+inputPdfFirmado?.addEventListener("change", () => {
+  const file = inputPdfFirmado.files?.[0] || null;
+  pdfFirmadoSeleccionado = file;
+  btnRegistrarFirmado.disabled = !file || !procesoFirmaPendiente;
+
+  if (file) {
+    archivoPdfFirmadoNombre.textContent = `PDF firmado seleccionado: ${file.name}`;
+    archivoPdfFirmadoNombre.classList.remove("oculto");
+  } else {
+    archivoPdfFirmadoNombre.textContent = "";
+    archivoPdfFirmadoNombre.classList.add("oculto");
+  }
+});
+
+btnCancelarFirma?.addEventListener("click", () => {
+  procesoFirmaPendiente = null;
+  pdfFirmadoSeleccionado = null;
+  if (inputPdfFirmado) inputPdfFirmado.value = "";
+  if (archivoPdfFirmadoNombre) archivoPdfFirmadoNombre.classList.add("oculto");
+  if (panelFirma) panelFirma.classList.add("oculto");
+  btnRegistrarFirmado.disabled = true;
+  mostrarEstado("Proceso de firma cancelado. La certificación no fue registrada.", "error");
+  if (archivoSeleccionado) archivoSeleccionado.estado = "pendiente";
+  renderLista();
+});
+
+btnRegistrarFirmado?.addEventListener("click", async () => {
+  if (!procesoFirmaPendiente || !pdfFirmadoSeleccionado || !usuarioActual) return;
+
+  btnRegistrarFirmado.disabled = true;
+  btnAplicar.disabled = true;
+
+  try {
+    const bytesFirmados = await pdfFirmadoSeleccionado.arrayBuffer();
+
+    // Validación mínima: debe ser un PDF válido y conservar el ID visible
+    // de la carátula que SAMICERT generó antes de la firma.
+    try {
+      await PDFLib.PDFDocument.load(bytesFirmados);
+    } catch (e) {
+      throw new Error("El archivo seleccionado no es un PDF válido o está dañado.");
+    }
+
+    const identidadEsperada = procesoFirmaPendiente.id;
+    let identidadConservada = false;
+
+    // PDF.js permite comprobar el texto de la primera página incluso si
+    // Firma ONPE reescribe los metadatos internos del PDF.
+    if (window.pdfjsLib) {
+      try {
+        const loadingTask = pdfjsLib.getDocument({ data: bytesFirmados });
+        const pdfVerificacion = await loadingTask.promise;
+        const primeraPagina = await pdfVerificacion.getPage(1);
+        const contenido = await primeraPagina.getTextContent();
+        const textoPagina = contenido.items.map(item => item.str || "").join(" ");
+        identidadConservada = textoPagina.includes(identidadEsperada);
+      } catch (e) {
+        console.warn("No fue posible leer el texto de la carátula con PDF.js:", e);
+      }
+    }
+
+    if (!identidadConservada) {
+      throw new Error(
+        "El PDF firmado no contiene el identificador de esta certificación en su primera página. " +
+        "Firme el PDF provisional generado por SAMICERT y vuelva a importarlo."
+      );
+    }
+
+    // ESTE es el SHA definitivo: corresponde al PDF ya firmado digitalmente.
+    const sha256Final = await calcularSHA256(bytesFirmados);
+
+    const registro = {
+      id: procesoFirmaPendiente.id,
+      fecha: procesoFirmaPendiente.fecha,
+      hora: procesoFirmaPendiente.hora,
+      archivoOriginal: procesoFirmaPendiente.archivoOriginal,
+      paginasCertificadas: procesoFirmaPendiente.paginasCertificadas,
+      totalPaginas: procesoFirmaPendiente.totalPaginas,
+      sha256: sha256Final,
+      sha256Final,
+      sha256PreFirma: procesoFirmaPendiente.sha256PreFirma,
+      sha256Origen: procesoFirmaPendiente.sha256Origen,
+      esRecertificacion: procesoFirmaPendiente.esRecertificacion,
+      motivoRecertificacion: procesoFirmaPendiente.motivoRecertificacion,
+      certificacionesPrevias: procesoFirmaPendiente.certificacionesPrevias,
+      certificadorUid: procesoFirmaPendiente.certificadorUid,
+      certificadorNombre: procesoFirmaPendiente.certificadorNombre,
+      certificadorEmail: procesoFirmaPendiente.certificadorEmail,
+      zonaHoraria: procesoFirmaPendiente.zonaHoraria,
+      selloArchivo: procesoFirmaPendiente.selloArchivo,
+      firmaDigital: true,
+      firmaDigitalTipo: "FIRMA ONPE",
+      firmadoEnSAMICERT: serverTimestamp(),
+      creadoEn: serverTimestamp(),
+      version: 10,
+      estado: "certificado"
+    };
+
+    // Se registra únicamente DESPUÉS de tener el PDF firmado y su SHA final.
+    await setDoc(doc(db, "certificaciones", procesoFirmaPendiente.id), registro);
+
+    const nombreFinal = nombreConSufijo(procesoFirmaPendiente.archivoOriginal);
+    let handleDestino = null;
+    if ("showSaveFilePicker" in window) {
+      try {
+        handleDestino = await window.showSaveFilePicker({
+          suggestedName: nombreFinal,
+          types: [{ description: "Documento PDF", accept: { "application/pdf": [".pdf"] } }]
+        });
+      } catch (err) {
+        if (err.name === "AbortError") {
+          // El registro ya es válido: si el operador no selecciona ubicación,
+          // se descarga una copia como respaldo para no perder el PDF final.
+          handleDestino = null;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    await guardarResultado(bytesFirmados, nombreFinal, handleDestino);
+
+    // Solo después de conservar/descargar el PDF firmado se crea el registro definitivo.
+    await setDoc(doc(db, "certificaciones", procesoFirmaPendiente.id), registro);
+
+    const idFinal = procesoFirmaPendiente.id;
+    const eraRecert = procesoFirmaPendiente.esRecertificacion;
+
+    procesoFirmaPendiente = null;
+    pdfFirmadoSeleccionado = null;
+    if (inputPdfFirmado) inputPdfFirmado.value = "";
+    if (panelFirma) panelFirma.classList.add("oculto");
+
+    limpiarArchivo();
+    mostrarEstado(
+      eraRecert
+        ? `Recertificación registrada definitivamente. PDF firmado por ${registro.certificadorNombre}. SHA-256 final calculado después de la firma. ID: ${idFinal}.`
+        : `Certificación registrada definitivamente. PDF firmado por ${registro.certificadorNombre}. SHA-256 final calculado después de la firma. ID: ${idFinal}.`,
+      "ok"
+    );
+  } catch (err) {
+    console.error(err);
+    mostrarEstado(
+      "No se pudo registrar el PDF firmado. La certificación no se completó: " + (err.message || ""),
+      "error"
+    );
+    btnRegistrarFirmado.disabled = false;
+  } finally {
+    btnAplicar.disabled = false;
+  }
+});
+
 
 async function renderDetalleConsulta(registro) {
   const paginas = (registro.paginasCertificadas || []).join(", ");
