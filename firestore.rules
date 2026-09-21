@@ -42,6 +42,14 @@ service cloud.firestore {
 
       allow update: if false;
       allow delete: if esAdministrador();
+
+      // Trozos en base64 del PDF certificado (archivado sin Firebase Storage).
+      match /pdfChunks/{chunkId} {
+        allow read: if esAdministrador() || esCertificador();
+        allow create: if esCertificador();
+        allow update: if false;
+        allow delete: if esAdministrador() || esCertificador();
+      }
     }
 
     match /{document=**} {

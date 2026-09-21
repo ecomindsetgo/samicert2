@@ -30,6 +30,92 @@ if (window.pdfjsLib) {
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 }
 
+// ── Archivado del PDF certificado en Firestore (SIN Firebase Storage) ──────
+// SAMICERT no usa Firebase Storage (requiere plan de facturación Blaze).
+// En su lugar, el PDF firmado se parte en trozos ("chunks") en base64 y se
+// guarda como subcolección del propio registro en Firestore, dentro del
+// plan gratuito (Spark). Un documento de Firestore admite máx. 1 MiB; se
+// deja margen usando trozos de 700 KB de PDF real (~933 KB ya en base64).
+const PDF_ARCHIVO_CHUNK_BYTES = 700 * 1024;
+// Límite de tamaño de PDF que se intenta archivar en Firestore. Por encima
+// de esto se omite el archivado (para no agotar la cuota gratuita) y el
+// registro queda solo con el PDF guardado localmente, como hasta ahora.
+const PDF_ARCHIVO_MAX_BYTES = 20 * 1024 * 1024;
+
+function uint8ToBase64(bytes) {
+  let binario = "";
+  const paso = 8192;
+  for (let i = 0; i < bytes.length; i += paso) {
+    binario += String.fromCharCode.apply(null, bytes.subarray(i, i + paso));
+  }
+  return btoa(binario);
+}
+
+function base64ToUint8(base64) {
+  const binario = atob(base64);
+  const bytes = new Uint8Array(binario.length);
+  for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+  return bytes;
+}
+
+// Guarda bytesFirmados como trozos en certificaciones/{id}/pdfChunks/{n}.
+// Se ejecuta ANTES de crear el documento principal (el documento principal
+// no admite "update", así que el resultado se agrega como campos del
+// registro al crearlo). No depende de que el documento principal ya exista.
+async function archivarPdfEnFirestore(certificacionId, bytesFirmados) {
+  if (!bytesFirmados || bytesFirmados.length > PDF_ARCHIVO_MAX_BYTES) {
+    return { archivado: false, totalChunks: 0 };
+  }
+  try {
+    const total = Math.ceil(bytesFirmados.length / PDF_ARCHIVO_CHUNK_BYTES);
+    for (let i = 0; i < total; i++) {
+      const trozo = bytesFirmados.subarray(
+        i * PDF_ARCHIVO_CHUNK_BYTES,
+        (i + 1) * PDF_ARCHIVO_CHUNK_BYTES
+      );
+      await setDoc(doc(db, "certificaciones", certificacionId, "pdfChunks", String(i)), {
+        indice: i,
+        datos: uint8ToBase64(trozo)
+      });
+    }
+    return { archivado: true, totalChunks: total };
+  } catch (err) {
+    console.error("No se pudo archivar el PDF certificado en Firestore:", err);
+    return { archivado: false, totalChunks: 0 };
+  }
+}
+
+// Reconstruye y descarga el PDF certificado desde Historial, leyendo los
+// trozos guardados en certificaciones/{id}/pdfChunks.
+async function descargarPdfArchivado(certificacionId, nombreSugerido) {
+  const snap = await getDocs(collection(db, "certificaciones", certificacionId, "pdfChunks"));
+  if (snap.empty) {
+    throw new Error("No se encontraron los datos del PDF archivado para este registro.");
+  }
+  const trozos = snap.docs
+    .map(d => d.data())
+    .sort((a, b) => a.indice - b.indice)
+    .map(d => base64ToUint8(d.datos));
+
+  const totalBytes = trozos.reduce((suma, t) => suma + t.length, 0);
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const t of trozos) {
+    bytes.set(t, offset);
+    offset += t.length;
+  }
+
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombreSugerido || `${certificacionId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
 const $ = id => document.getElementById(id);
 
 const loginScreen = $("loginScreen");
@@ -1405,7 +1491,7 @@ async function guardarResultado(bytesSalida, nombre, handleDestino, archivoFuent
   };
 }
 
-function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, firebaseMensaje = "") {
+function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, firebaseMensaje = "", pdfArchivado = false) {
   const box = $("hashResultado");
   if (!box) return;
 
@@ -1413,6 +1499,9 @@ function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, fireba
   const estadoFirebase = firebaseOk
     ? `<div style="margin-top:8px;color:#16823a;font-size:12px;font-weight:700">✓ Registro de certificación actualizado correctamente.</div>`
     : `<div style="margin-top:8px;color:#8a6416;font-size:12px;font-weight:700">⚠️ El PDF quedó guardado localmente. El registro en Firebase no pudo actualizarse${firebaseMensaje ? `: ${escapeHtml(firebaseMensaje)}` : "."}</div>`;
+  const estadoArchivo = pdfArchivado
+    ? `<div style="margin-top:4px;color:#16823a;font-size:12px;font-weight:700">✓ Copia del PDF certificado archivada en Firestore (descargable luego desde Historial).</div>`
+    : `<div style="margin-top:4px;color:#8a6416;font-size:12px;font-weight:700">⚠️ El PDF no se archivó en Firestore (excede el tamaño permitido o hubo un error). Solo queda la copia local.</div>`;
 
   const abrir = resultado?.verificado
     ? `<button type="button" class="btn-green" id="btnAbrirPdfCertificado" style="margin-top:12px">📄 Abrir PDF certificado</button>`
@@ -1431,7 +1520,8 @@ function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, fireba
       ${resultado.verificado ? "✓ Se verificó el tamaño y la huella del archivo después de guardarlo." : ""}
     </div>
     ${abrir}
-    ${estadoFirebase}`;
+    ${estadoFirebase}
+    ${estadoArchivo}`;
 
   const btnAbrir = $("btnAbrirPdfCertificado");
   if (btnAbrir && resultado.file) {
@@ -1651,11 +1741,56 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
     // ESTE es el SHA definitivo: corresponde al PDF ya firmado digitalmente.
     const sha256Final = await calcularSHA256(bytesFirmados.slice());
 
+    // Verificación local previa: evita enviar una certificación con un UID distinto
+    // al usuario que inició el proceso de firma.
+    if (usuarioActual.uid !== procesoFirmaPendiente.certificadorUid) {
+      throw new Error(
+        `La sesión actual no coincide con el certificador que inició la operación (UID ${usuarioActual.uid}). Cierre sesión e ingrese nuevamente con la cuenta autorizada.`
+      );
+    }
+
+    const nombreFinal = nombreConSufijo(procesoFirmaPendiente.archivoOriginal);
+
+    // PRIMERO: guardar el PDF firmado físicamente en la ubicación elegida
+    // por el operador. La certificación local NO depende de Firebase Storage.
+    // Si Firebase no está disponible o no tiene cuota, el PDF ya quedó guardado
+    // y verificado en el equipo.
+    let handleDestino = null;
+    if ("showSaveFilePicker" in window) {
+      try {
+        handleDestino = await window.showSaveFilePicker({
+          suggestedName: nombreFinal,
+          types: [{ description: "Documento PDF", accept: { "application/pdf": [".pdf"] } }]
+        });
+      } catch (err) {
+        if (err.name === "AbortError") {
+          throw new Error("Se canceló la selección de la carpeta. El PDF no se ha dado por guardado.");
+        }
+        throw err;
+      }
+    }
+
+    const resultadoGuardado = await guardarResultado(bytesFirmados.slice(), nombreFinal, handleDestino, null);
+
+    const idFinal = procesoFirmaPendiente.id;
+    const eraRecert = procesoFirmaPendiente.esRecertificacion;
+
+    // SEGUNDO: archivar el PDF certificado en Firestore por trozos, sin usar
+    // Firebase Storage (plan gratuito). Se hace antes de crear el registro
+    // principal porque este último no admite actualizaciones posteriores;
+    // si falla o el archivo excede el límite, el registro se crea igual,
+    // solo que sin PDF descargable desde Historial.
+    const archivoPdf = await archivarPdfEnFirestore(procesoFirmaPendiente.id, bytesFirmados);
+
     const registro = {
       id: procesoFirmaPendiente.id,
       fecha: procesoFirmaPendiente.fecha,
       hora: procesoFirmaPendiente.hora,
       archivoOriginal: procesoFirmaPendiente.archivoOriginal,
+      archivoCertificadoNombre: nombreFinal,
+      pdfArchivado: archivoPdf.archivado,
+      pdfChunksTotal: archivoPdf.totalChunks,
+      pdfBytesTotal: archivoPdf.archivado ? bytesFirmados.length : 0,
       paginasCertificadas: procesoFirmaPendiente.paginasCertificadas,
       totalPaginas: procesoFirmaPendiente.totalPaginas,
       sha256: sha256Final,
@@ -1678,40 +1813,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       estado: "certificado"
     };
 
-    // Verificación local previa: evita enviar una certificación con un UID distinto
-    // al usuario que inició el proceso de firma.
-    if (usuarioActual.uid !== procesoFirmaPendiente.certificadorUid) {
-      throw new Error(
-        `La sesión actual no coincide con el certificador que inició la operación (UID ${usuarioActual.uid}). Cierre sesión e ingrese nuevamente con la cuenta autorizada.`
-      );
-    }
-
-    // PRIMERO: guardar el PDF firmado físicamente en la ubicación elegida
-    // por el operador. La certificación local NO depende de Firebase Storage.
-    // Si Firebase no está disponible o no tiene cuota, el PDF ya quedó guardado
-    // y verificado en el equipo.
-    const nombreFinal = nombreConSufijo(procesoFirmaPendiente.archivoOriginal);
-    let handleDestino = null;
-    if ("showSaveFilePicker" in window) {
-      try {
-        handleDestino = await window.showSaveFilePicker({
-          suggestedName: nombreFinal,
-          types: [{ description: "Documento PDF", accept: { "application/pdf": [".pdf"] } }]
-        });
-      } catch (err) {
-        if (err.name === "AbortError") {
-          throw new Error("Se canceló la selección de la carpeta. El PDF no se ha dado por guardado.");
-        }
-        throw err;
-      }
-    }
-
-    const resultadoGuardado = await guardarResultado(bytesFirmados.slice(), nombreFinal, handleDestino, null);
-
-    const idFinal = procesoFirmaPendiente.id;
-    const eraRecert = procesoFirmaPendiente.esRecertificacion;
-
-    // SEGUNDO: intentar registrar en Firestore. Esto es complementario al
+    // TERCERO: intentar registrar en Firestore. Esto es complementario al
     // archivo local; un fallo de Firebase no invalida el PDF ya verificado.
     let firebaseOk = false;
     let firebaseMensaje = "";
@@ -1736,7 +1838,8 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       nombreFinal,
       idFinal,
       firebaseOk,
-      firebaseMensaje
+      firebaseMensaje,
+      archivoPdf.archivado
     );
   } catch (err) {
     console.error(err);
@@ -1967,6 +2070,11 @@ function renderHistorialPagina() {
         <strong>${escapeHtml(r.certificadorNombre || "")}</strong><br>
         <span>${escapeHtml(r.certificadorEmail || "")}</span>
       </div>
+      <div class="history-pdf">
+        ${r.pdfArchivado
+          ? `<button type="button" class="btn-small btn-icon btn-hist-pdf" data-id="${escapeHtml(r.id)}" data-nombre="${escapeHtml(r.archivoCertificadoNombre || r.archivoOriginal || (r.id + ".pdf"))}">${ICONOS.descargar} PDF</button>`
+          : `<span class="hist-pdf-na" title="Este registro no tiene el PDF archivado en Firestore">Sin PDF</span>`}
+      </div>
     </div>
   `).join("");
 
@@ -2138,11 +2246,21 @@ async function eliminarSeleccionadosAdmin() {
 
   try {
     for (const id of ids) {
+      // Primero se eliminan los trozos del PDF archivado en Firestore (si
+      // existen), y luego el registro principal. SAMICERT no usa Firebase
+      // Storage: el PDF firmado también se conserva localmente o en la ruta
+      // institucional definida por la entidad.
+      try {
+        const chunksSnap = await getDocs(collection(db, "certificaciones", id, "pdfChunks"));
+        for (const chunkDoc of chunksSnap.docs) {
+          await deleteDoc(chunkDoc.ref);
+        }
+      } catch (chunkErr) {
+        console.error(`No se pudieron eliminar los trozos de PDF de ${id}:`, chunkErr);
+      }
       await deleteDoc(doc(db,"certificaciones",id));
-      // SAMICERT no usa Firebase Storage: el PDF firmado se conserva localmente
-      // o en la ruta institucional definida por la entidad.
     }
-    estado.textContent = `Se eliminaron ${ids.length} registro(s), incluyendo su PDF respaldado cuando existía.`;
+    estado.textContent = `Se eliminaron ${ids.length} registro(s), incluyendo su PDF archivado cuando existía.`;
     await cargarAdministracion();
     await cargarHistorial();
   } catch (err) {
@@ -2176,6 +2294,27 @@ document.querySelectorAll("[data-go]").forEach(btn => {
 });
 
 $("btnActualizarHistorial").addEventListener("click", cargarHistorial);
+
+$("historialLista").addEventListener("click", async e => {
+  const btn = e.target.closest(".btn-hist-pdf");
+  if (!btn) return;
+
+  const id = btn.dataset.id;
+  const nombre = btn.dataset.nombre;
+  const textoOriginal = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = "Descargando…";
+
+  try {
+    await descargarPdfArchivado(id, nombre);
+  } catch (err) {
+    console.error(err);
+    alert("No se pudo descargar el PDF: " + (err.message || "error desconocido"));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = textoOriginal;
+  }
+});
 $("btnCrearBackup").addEventListener("click", crearBackupAdmin);
 $("btnEliminarSeleccionados").addEventListener("click", eliminarSeleccionadosAdmin);
 $("btnSeleccionarTodosAdmin").addEventListener("click", () => seleccionarTodosAdmin(true));
