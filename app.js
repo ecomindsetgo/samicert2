@@ -1292,7 +1292,7 @@ async function aplicarSelloAUnPdf(file) {
   // paso de firma externa. El SHA-256 definitivo NO se calcula aquí.
   pdfDoc.setTitle(`SAMICERT ${certId}`);
   pdfDoc.setSubject(`SAMICERT:${certId}`);
-  pdfDoc.setKeywords(["SAMICERT", certId, "PENDIENTE_FIRMA"]);
+  pdfDoc.setKeywords(["SAMICERT", certId, "SF"]);
 
   return {
     bytesSalida: await pdfDoc.save(),
@@ -1458,8 +1458,8 @@ btnAplicar.addEventListener("click", async () => {
 
   btnAplicar.disabled = true;
   const nombreProvisional = archivoSeleccionado.name.toLowerCase().endsWith(".pdf")
-    ? archivoSeleccionado.name.slice(0, -4) + "[PENDIENTE-FIRMA].pdf"
-    : archivoSeleccionado.name + "[PENDIENTE-FIRMA].pdf";
+    ? archivoSeleccionado.name.slice(0, -4) + "[SF].pdf"
+    : archivoSeleccionado.name + "[SF].pdf";
 
   let datosRecert = { continuar: true, motivo: "" };
   try {
@@ -1525,8 +1525,27 @@ btnAplicar.addEventListener("click", async () => {
       selloArchivo: obtenerUsuarioAutorizado(usuarioActual)?.sello.replace("./", "") || ""
     };
 
-    // El provisional se descarga para abrirlo y firmarlo con Firma ONPE.
-    await guardarResultado(resultado.bytesSalida, nombreProvisional, null);
+    // El PDF provisional [SF] ya no se descarga automáticamente.
+    // En navegadores compatibles, se solicita al operador la ubicación exacta
+    // donde desea guardarlo para luego abrirlo y firmarlo con Firma ONPE.
+    let handleProvisional = null;
+    if ("showSaveFilePicker" in window) {
+      try {
+        handleProvisional = await window.showSaveFilePicker({
+          suggestedName: nombreProvisional,
+          types: [{ description: "Documento PDF", accept: { "application/pdf": [".pdf"] } }]
+        });
+      } catch (err) {
+        if (err.name === "AbortError") {
+          throw new Error("Se canceló la selección de ubicación. El PDF [SF] no se ha guardado.");
+        }
+        throw err;
+      }
+    } else {
+      throw new Error("Este navegador no permite seleccionar una ubicación para guardar el PDF [SF]. Abra SAMICERT en Google Chrome o Microsoft Edge.");
+    }
+
+    await guardarResultado(resultado.bytesSalida.slice(), nombreProvisional, handleProvisional, null);
 
     panelFirma.classList.remove("oculto");
     archivoPdfFirmadoNombre.classList.add("oculto");
@@ -1537,7 +1556,7 @@ btnAplicar.addEventListener("click", async () => {
     archivoSeleccionado.estado = "pendiente-firma";
     renderLista();
     mostrarEstado(
-      "Documento provisional generado. Fírmelo con Firma ONPE y luego importe aquí el PDF firmado. SAMICERT aún no ha registrado la certificación definitiva.",
+      "Documento [SF] guardado en la ubicación seleccionada. Fírmelo con Firma ONPE y luego importe aquí el PDF firmado. SAMICERT aún no ha registrado la certificación definitiva.",
       "ok"
     );
   } catch (err) {
