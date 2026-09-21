@@ -6,15 +6,11 @@ import {
 import {
   getFirestore, doc, getDoc, setDoc, deleteDoc, query, collection, where, limit, getDocs, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
-import {
-  getStorage, ref as storageRef, deleteObject
-} from "https://www.gstatic.com/firebasejs/12.17.1/firebase-storage.js";
 import { firebaseConfig, ADMIN_UID } from "./firebase-config.js";
 
 const appFirebase = initializeApp(firebaseConfig);
 const auth = getAuth(appFirebase);
 const db = getFirestore(appFirebase);
-const storage = getStorage(appFirebase);
 
 const ICONOS = {
   lupa: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.35-4.35"/></svg>',
@@ -98,6 +94,13 @@ const USUARIOS_AUTORIZADOS = {
     sello: "./sello-roberto.png"
   }
 };
+
+function obtenerUsuarioAutorizado(user) {
+  if (!user) return null;
+  if (USUARIOS_AUTORIZADOS[user.uid]) return USUARIOS_AUTORIZADOS[user.uid];
+  const email = (user.email || "").toLowerCase();
+  return Object.values(USUARIOS_AUTORIZADOS).find(u => (u.correo || "").toLowerCase() === email) || null;
+}
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, c => ({
@@ -1403,7 +1406,7 @@ btnAplicar.addEventListener("click", async () => {
       certificadorNombre: perfilActual?.nombre || usuarioActual.displayName || usuarioActual.email || "Usuario autorizado",
       certificadorEmail: usuarioActual.email || "",
       zonaHoraria: "America/Lima",
-      selloArchivo: USUARIOS_AUTORIZADOS[usuarioActual.uid].sello.replace("./", "")
+      selloArchivo: obtenerUsuarioAutorizado(usuarioActual)?.sello.replace("./", "") || ""
     };
 
     // El provisional se descarga para abrirlo y firmarlo con Firma ONPE.
@@ -1529,12 +1532,29 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       firmaDigitalTipo: "FIRMA ONPE",
       firmadoEnSAMICERT: serverTimestamp(),
       creadoEn: serverTimestamp(),
-      version: 10,
+      version: 11,
       estado: "certificado"
     };
 
-    // Se registra únicamente DESPUÉS de tener el PDF firmado y su SHA final.
-    await setDoc(doc(db, "certificaciones", procesoFirmaPendiente.id), registro);
+    // Verificación local previa: evita enviar una certificación con un UID distinto
+    // al usuario que inició el proceso de firma.
+    if (usuarioActual.uid !== procesoFirmaPendiente.certificadorUid) {
+      throw new Error(
+        `La sesión actual no coincide con el certificador que inició la operación (UID ${usuarioActual.uid}). Cierre sesión e ingrese nuevamente con la cuenta autorizada.`
+      );
+    }
+
+    // Se registra una sola vez y únicamente DESPUÉS de tener el PDF firmado y su SHA final.
+    try {
+      await setDoc(doc(db, "certificaciones", procesoFirmaPendiente.id), registro);
+    } catch (firebaseError) {
+      if (firebaseError?.code === "permission-denied") {
+        throw new Error(
+          `Firebase rechazó el registro por permisos de Firestore. Usuario: ${usuarioActual.email || "sin correo"} · UID: ${usuarioActual.uid}. Verifique que este UID/correo esté autorizado en firestore.rules y que las reglas hayan sido publicadas en Firebase.`
+        );
+      }
+      throw firebaseError;
+    }
 
     const nombreFinal = nombreConSufijo(procesoFirmaPendiente.archivoOriginal);
     let handleDestino = null;
@@ -1556,9 +1576,6 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
     }
 
     await guardarResultado(bytesFirmados, nombreFinal, handleDestino);
-
-    // Solo después de conservar/descargar el PDF firmado se crea el registro definitivo.
-    await setDoc(doc(db, "certificaciones", procesoFirmaPendiente.id), registro);
 
     const idFinal = procesoFirmaPendiente.id;
     const eraRecert = procesoFirmaPendiente.esRecertificacion;
@@ -1976,13 +1993,8 @@ async function eliminarSeleccionadosAdmin() {
   try {
     for (const id of ids) {
       await deleteDoc(doc(db,"certificaciones",id));
-      try {
-        await deleteObject(storageRef(storage, `certificaciones/${id}.pdf`));
-      } catch (errPdf) {
-        // El PDF puede no existir en Storage (certificaciones anteriores a esta
-        // función, o el respaldo falló en su momento): no se considera un error.
-        console.warn(`No se eliminó el PDF respaldado de ${id}:`, errPdf?.code || errPdf);
-      }
+      // SAMICERT no usa Firebase Storage: el PDF firmado se conserva localmente
+      // o en la ruta institucional definida por la entidad.
     }
     estado.textContent = `Se eliminaron ${ids.length} registro(s), incluyendo su PDF respaldado cuando existía.`;
     await cargarAdministracion();
@@ -2024,7 +2036,7 @@ $("btnSeleccionarTodosAdmin").addEventListener("click", () => seleccionarTodosAd
 $("btnDeseleccionarTodosAdmin").addEventListener("click", () => seleccionarTodosAdmin(false));
 
 async function cargarPerfil(user) {
-  const autorizado = USUARIOS_AUTORIZADOS[user.uid];
+  const autorizado = obtenerUsuarioAutorizado(user);
   const esAdmin = user.uid === ADMIN_UID;
 
   if (!autorizado && !esAdmin) {

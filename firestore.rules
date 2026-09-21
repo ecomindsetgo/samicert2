@@ -12,7 +12,9 @@ service cloud.firestore {
       return request.auth != null &&
         (
           request.auth.uid == "wBCSJ3XfHVaUZPLmC2yJddh5RXx1" ||
-          request.auth.uid == "4tdNYgErvlM7NB3hwP933avL3RT2"
+          request.auth.uid == "4tdNYgErvlM7NB3hwP933avL3RT2" ||
+          request.auth.token.email == "jdesposorio@pj.gob.pe" ||
+          request.auth.token.email == "rdavilaaa@pj.gob.pe"
         );
     }
 
