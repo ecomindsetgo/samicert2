@@ -961,8 +961,30 @@ function dibujarNumeracionPagina(pagina, indice, total, rotacionFinal, fuente) {
 }
 
 // ── Utilidades para el código QR de la carátula (sin dependencias del DOM además del canvas) ──
-function generarQRDataUrl(texto, tamanoPx = 320) {
-  const qr = qrcode(0, "M");
+// Carga el emblema que va al centro del QR (logo-qr.png). Si no está o no se puede leer,
+// el QR se genera igual, sin emblema.
+async function cargarLogoParaQR() {
+  try {
+    const resp = await fetch("./logo-qr.png", { cache: "no-cache" });
+    if (!resp.ok) throw new Error("sin logo-qr.png publicado");
+    const blob = await resp.blob();
+    return await new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(blob);
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("logo-qr.png ilegible")); };
+      img.src = url;
+    });
+  } catch (e) {
+    console.error("El QR se generará sin emblema central:", e);
+    return null;
+  }
+}
+
+async function generarQRDataUrl(texto, tamanoPx = 320) {
+  // Corrección de errores nivel "H" (~30 %): permite tapar el centro con el emblema
+  // y que el QR siga siendo legible.
+  const qr = qrcode(0, "H");
   qr.addData(texto);
   qr.make();
   const count = qr.getModuleCount();
@@ -979,6 +1001,19 @@ function generarQRDataUrl(texto, tamanoPx = 320) {
     for (let c = 0; c < count; c++) {
       if (qr.isDark(r, c)) ctx.fillRect(c * cell, r * cell, cell, cell);
     }
+  }
+
+  const logo = await cargarLogoParaQR();
+  if (logo) {
+    // El emblema ocupa ~20 % del ancho del QR (≈4 % de su área) sobre un fondo blanco
+    const caja = Math.round(size * 0.20);
+    const escala = Math.min(caja / logo.width, caja / logo.height);
+    const w = Math.round(logo.width * escala), h = Math.round(logo.height * escala);
+    const margen = Math.max(3, Math.round(size * 0.015));
+    const cx = size / 2, cy = size / 2;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(Math.round(cx - w / 2 - margen), Math.round(cy - h / 2 - margen), w + margen * 2, h + margen * 2);
+    ctx.drawImage(logo, Math.round(cx - w / 2), Math.round(cy - h / 2), w, h);
   }
   return canvas.toDataURL("image/png");
 }
@@ -1143,9 +1178,9 @@ async function crearPaginaCaratula(pdfDoc, resumen) {
   y -= 28;
 
   try {
-    const qrBytes = dataUrlABytes(generarQRDataUrl(resumen.consultaUrl, 340));
+    const qrBytes = dataUrlABytes(await generarQRDataUrl(resumen.consultaUrl, 480));
     const qrImg = await pdfDoc.embedPng(qrBytes);
-    const qrTam = 118;
+    const qrTam = 130;
     pagina.drawImage(qrImg, { x: width / 2 - qrTam / 2, y: y - qrTam, width: qrTam, height: qrTam });
     y -= qrTam + 14;
   } catch (e) {
