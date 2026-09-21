@@ -86,9 +86,13 @@ service cloud.firestore {
       allow update: if false;
       allow delete: if esAdministrador();
 
+      // Desde v15, el PDF final firmado ya NO se archiva en Firestore (viaja
+      // por la carpeta compartida). Se deja de permitir nuevos chunks aquí;
+      // solo se conserva lectura/borrado por compatibilidad con registros
+      // antiguos que sí llegaron a archivar el PDF en chunks.
       match /pdfChunks/{chunkId} {
         allow read: if esAdministrador() || esCertificador() || esMesaPartes();
-        allow create: if esMesaPartes();
+        allow create: if false;
         allow update: if false;
         allow delete: if esAdministrador() || esMesaPartes();
       }

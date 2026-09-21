@@ -30,110 +30,26 @@ if (window.pdfjsLib) {
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 }
 
-// ── Archivado del PDF certificado en Firestore (SIN Firebase Storage) ──────
-// SAMICERT no usa Firebase Storage (requiere plan de facturación Blaze).
-// En su lugar, el PDF firmado se parte en trozos ("chunks") en base64 y se
-// guarda como subcolección del propio registro en Firestore, dentro del
-// plan gratuito (Spark). Un documento de Firestore admite máx. 1 MiB; se
-// deja margen usando trozos de 700 KB de PDF real (~933 KB ya en base64).
-const PDF_ARCHIVO_CHUNK_BYTES = 700 * 1024;
-// Límite de tamaño de PDF que se intenta archivar en Firestore. Por encima
-// de esto se omite el archivado (para no agotar la cuota gratuita) y el
-// registro queda solo con el PDF guardado localmente, como hasta ahora.
-const PDF_ARCHIVO_MAX_BYTES = 20 * 1024 * 1024;
-
-function uint8ToBase64(bytes) {
-  let binario = "";
-  const paso = 8192;
-  for (let i = 0; i < bytes.length; i += paso) {
-    binario += String.fromCharCode.apply(null, bytes.subarray(i, i + paso));
-  }
-  return btoa(binario);
-}
-
-function base64ToUint8(base64) {
-  const binario = atob(base64);
-  const bytes = new Uint8Array(binario.length);
-  for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
-  return bytes;
-}
-
-// Guarda bytesFirmados como trozos en certificaciones/{id}/pdfChunks/{n}.
-// Se ejecuta ANTES de crear el documento principal (el documento principal
-// no admite "update", así que el resultado se agrega como campos del
-// registro al crearlo). No depende de que el documento principal ya exista.
-async function archivarPdfEnFirestore(certificacionId, bytesFirmados) {
-  if (!bytesFirmados || bytesFirmados.length > PDF_ARCHIVO_MAX_BYTES) {
-    return { archivado: false, totalChunks: 0 };
-  }
-  try {
-    const total = Math.ceil(bytesFirmados.length / PDF_ARCHIVO_CHUNK_BYTES);
-    for (let i = 0; i < total; i++) {
-      const trozo = bytesFirmados.subarray(
-        i * PDF_ARCHIVO_CHUNK_BYTES,
-        (i + 1) * PDF_ARCHIVO_CHUNK_BYTES
-      );
-      await setDoc(doc(db, "certificaciones", certificacionId, "pdfChunks", String(i)), {
-        indice: i,
-        datos: uint8ToBase64(trozo)
-      });
-    }
-    return { archivado: true, totalChunks: total };
-  } catch (err) {
-    console.error("No se pudo archivar el PDF certificado en Firestore:", err);
-    return { archivado: false, totalChunks: 0 };
-  }
-}
-
-// Reconstruye y descarga el PDF certificado desde Historial, leyendo los
-// trozos guardados en certificaciones/{id}/pdfChunks.
+// NOTA v15: SAMICERT ya NO archiva el PDF certificado (ni el provisional ni
+// el final firmado) en Firestore. Ambos PDFs quedan únicamente en la
+// carpeta compartida (guardados en disco por el certificador y por Mesa de
+// Partes respectivamente). Esto evita las subidas en chunks a Firestore,
+// que eran lentas y hacían crecer la base de datos sin necesidad; Firestore
+// solo guarda los metadatos de cada certificación.
 const MESA_PARTES_EMAIL = "archivocsjsanta@pj.gob.pe";
 
 function esUsuarioMesaPartes(user = usuarioActual) {
   return !!user && (user.email || "").toLowerCase() === MESA_PARTES_EMAIL;
 }
 
-// NOTA v14 (Mesa de Partes por carpeta compartida): el PDF provisional
-// [SF] generado por el certificador YA NO se archiva en Firestore ni se
-// descarga desde la app. El certificador lo guarda directamente (mediante
-// el selector de guardado del navegador) en la carpeta compartida con
-// Mesa de Partes, y Mesa de Partes lo firma con Firma ONPE desde ahí.
 // Se conserva eliminarPdfPendiente por compatibilidad con registros
-// antiguos que sí llegaron a archivar chunks en pendientesFirma/pdfChunks.
+// antiguos que sí llegaron a archivar chunks en pendientesFirma/pdfChunks
+// o certificaciones/pdfChunks en versiones previas de SAMICERT.
 async function eliminarPdfPendiente(pendienteId, totalChunks = 0) {
   if (!totalChunks) return;
   for (let i = 0; i < totalChunks; i++) {
     await deleteDoc(doc(db, "pendientesFirma", pendienteId, "pdfChunks", String(i)));
   }
-}
-
-async function descargarPdfArchivado(certificacionId, nombreSugerido) {
-  const snap = await getDocs(collection(db, "certificaciones", certificacionId, "pdfChunks"));
-  if (snap.empty) {
-    throw new Error("No se encontraron los datos del PDF archivado para este registro.");
-  }
-  const trozos = snap.docs
-    .map(d => d.data())
-    .sort((a, b) => a.indice - b.indice)
-    .map(d => base64ToUint8(d.datos));
-
-  const totalBytes = trozos.reduce((suma, t) => suma + t.length, 0);
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const t of trozos) {
-    bytes.set(t, offset);
-    offset += t.length;
-  }
-
-  const blob = new Blob([bytes], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = nombreSugerido || `${certificacionId}.pdf`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 const $ = id => document.getElementById(id);
@@ -1828,23 +1744,14 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       bytesFirmados.slice(), nombreFinal, handleDestino, null
     );
 
-    const archivoPdf = await archivarPdfEnFirestore(pendienteFirmaActual.id, bytesFirmados);
-    if (!archivoPdf.archivado) {
-      throw new Error(
-        bytesFirmados.length > PDF_ARCHIVO_MAX_BYTES
-          ? "El PDF firmado supera el tamaño máximo permitido para archivarlo."
-          : "El PDF se guardó localmente, pero no pudo archivarse en SAMICERT. No se registrará la certificación definitiva."
-      );
-    }
-
     const registro = {
       id: pendienteFirmaActual.id,
       fecha: pendienteFirmaActual.fecha,
       hora: pendienteFirmaActual.hora,
       archivoOriginal: pendienteFirmaActual.archivoOriginal,
       archivoCertificadoNombre: nombreFinal,
-      pdfArchivado: true,
-      pdfChunksTotal: archivoPdf.totalChunks,
+      pdfArchivado: false,
+      pdfChunksTotal: 0,
       pdfBytesTotal: bytesFirmados.length,
       paginasCertificadas: pendienteFirmaActual.paginasCertificadas,
       totalPaginas: pendienteFirmaActual.totalPaginas,
@@ -1904,10 +1811,6 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
       true,
       "",
       true
-    );
-
-    alert(
-      `Certificación registrada correctamente.\\n\\nID: ${registro.id}\\nSHA-256: ${sha256Final}\\n\\nEl PDF quedó guardado en la ubicación seleccionada y puede ser remitido.`
     );
   } catch (err) {
     console.error(err);
@@ -2131,11 +2034,6 @@ function renderHistorialPagina() {
       <div class="history-cert">
         <strong>${escapeHtml(r.certificadorNombre || "")}</strong><br>
         <span>${escapeHtml(r.certificadorEmail || "")}</span>
-      </div>
-      <div class="history-pdf">
-        ${r.pdfArchivado
-          ? `<button type="button" class="btn-small btn-icon btn-hist-pdf" data-id="${escapeHtml(r.id)}" data-nombre="${escapeHtml(r.archivoCertificadoNombre || r.archivoOriginal || (r.id + ".pdf"))}">${ICONOS.descargar} PDF</button>`
-          : `<span class="hist-pdf-na" title="Este registro no tiene el PDF archivado en Firestore">Sin PDF</span>`}
       </div>
     </div>
   `).join("");
@@ -2381,26 +2279,6 @@ document.querySelectorAll("[data-go]").forEach(btn => {
 
 $("btnActualizarHistorial").addEventListener("click", cargarHistorial);
 
-$("historialLista").addEventListener("click", async e => {
-  const btn = e.target.closest(".btn-hist-pdf");
-  if (!btn) return;
-
-  const id = btn.dataset.id;
-  const nombre = btn.dataset.nombre;
-  const textoOriginal = btn.innerHTML;
-  btn.disabled = true;
-  btn.textContent = "Descargando…";
-
-  try {
-    await descargarPdfArchivado(id, nombre);
-  } catch (err) {
-    console.error(err);
-    alert("No se pudo descargar el PDF: " + (err.message || "error desconocido"));
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = textoOriginal;
-  }
-});
 $("btnCrearBackup").addEventListener("click", crearBackupAdmin);
 $("btnEliminarSeleccionados").addEventListener("click", eliminarSeleccionadosAdmin);
 $("btnSeleccionarTodosAdmin").addEventListener("click", () => seleccionarTodosAdmin(true));
