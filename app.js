@@ -1310,8 +1310,8 @@ async function aplicarSelloAUnPdf(file) {
 function nombreConSufijo(nombre) {
   const idx = nombre.toLowerCase().lastIndexOf(".pdf");
   return idx === -1
-    ? nombre + "_F.pdf"
-    : nombre.slice(0,idx) + "[F]" + nombre.slice(idx);
+    ? nombre + "[F][C].pdf"
+    : nombre.slice(0,idx) + "[F][C]" + nombre.slice(idx);
 }
 
 async function guardarResultado(bytesSalida, nombre, handleDestino, archivoFuente = null) {
