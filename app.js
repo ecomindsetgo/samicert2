@@ -1499,13 +1499,6 @@ function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, fireba
   const estadoFirebase = firebaseOk
     ? `<div style="margin-top:8px;color:#16823a;font-size:12px;font-weight:700">✓ Registro de certificación actualizado correctamente.</div>`
     : `<div style="margin-top:8px;color:#8a6416;font-size:12px;font-weight:700">⚠️ El PDF quedó guardado localmente. El registro en Firebase no pudo actualizarse${firebaseMensaje ? `: ${escapeHtml(firebaseMensaje)}` : "."}</div>`;
-  const estadoArchivo = pdfArchivado
-    ? `<div style="margin-top:4px;color:#16823a;font-size:12px;font-weight:700">✓ Copia del PDF certificado archivada en Firestore (descargable luego desde Historial).</div>`
-    : `<div style="margin-top:4px;color:#8a6416;font-size:12px;font-weight:700">⚠️ El PDF no se archivó en Firestore (excede el tamaño permitido o hubo un error). Solo queda la copia local.</div>`;
-
-  const abrir = resultado?.verificado
-    ? `<button type="button" class="btn-green" id="btnAbrirPdfCertificado" style="margin-top:12px">📄 Abrir PDF certificado</button>`
-    : `<div style="margin-top:10px;font-size:12px;color:#64748b">El PDF se envió a la carpeta de descargas del navegador.</div>`;
 
   box.classList.remove("oculto");
   box.style.borderLeftColor = "#16823a";
@@ -1519,28 +1512,7 @@ function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, fireba
        <strong>SHA-256:</strong> <span style="word-break:break-all">${escapeHtml(resultado.sha256 || "")}</span><br>
       ${resultado.verificado ? "✓ Se verificó el tamaño y la huella del archivo después de guardarlo." : ""}
     </div>
-    ${abrir}
-    ${estadoFirebase}
-    ${estadoArchivo}`;
-
-  const btnAbrir = $("btnAbrirPdfCertificado");
-  if (btnAbrir && resultado.file) {
-    btnAbrir.addEventListener("click", () => {
-      const url = URL.createObjectURL(resultado.file);
-      const ventana = window.open(url, "_blank", "noopener,noreferrer");
-      if (!ventana) {
-        // Si el navegador bloquea la ventana emergente, el enlace se descarga
-        // como alternativa sin perder la referencia al archivo verificado.
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = resultado.nombre || nombre;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    });
-  }
+    ${estadoFirebase}`;
 }
 
 btnAplicar.addEventListener("click", async () => {
