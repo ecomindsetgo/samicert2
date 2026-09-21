@@ -1322,77 +1322,6 @@ function nombreConSufijo(nombre) {
     : nombre.slice(0,idx) + "[F]" + nombre.slice(idx);
 }
 
-// ── Respaldo del PDF final en Firestore (sin Firebase Storage) ─────────────
-// Firebase Storage ahora exige el plan de pago Blaze solo para habilitarse,
-// aunque el uso real quede dentro de la capa gratuita. Firestore, en cambio,
-// sigue funcionando en el plan Spark (gratis) sin cuenta de facturación.
-// Como Firestore limita cada documento a 1 MiB, el PDF (convertido a Base64)
-// se parte en fragmentos de texto y se guarda en la subcolección
-// certificaciones/{id}/archivo/{n}. Al pedirlo de vuelta, los fragmentos se
-// unen y se reconstruye el PDF original byte a byte.
-const RESPALDO_CHUNK_CHARS = 700000;            // ~700 KB de texto Base64 por documento
-const RESPALDO_LIMITE_BYTES = 20 * 1024 * 1024; // por encima de esto no se respalda (solo local)
-
-function bytesABase64(bytes) {
-  let binario = "";
-  const paso = 0x8000;
-  for (let i = 0; i < bytes.length; i += paso) {
-    binario += String.fromCharCode(...bytes.subarray(i, i + paso));
-  }
-  return btoa(binario);
-}
-
-function base64ABytes(base64) {
-  const binario = atob(base64);
-  const bytes = new Uint8Array(binario.length);
-  for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
-  return bytes;
-}
-
-// Guarda el PDF final certificado como fragmentos Base64 en Firestore.
-// Devuelve true si quedó respaldado, false si se omitió (archivo muy grande).
-async function respaldarPdfEnFirestore(certificacionId, bytesSalida) {
-  if (bytesSalida.byteLength > RESPALDO_LIMITE_BYTES) {
-    console.warn(`PDF de ${certificacionId} supera el límite de respaldo automático (${RESPALDO_LIMITE_BYTES} bytes); queda solo en el equipo.`);
-    return false;
-  }
-
-  const base64 = bytesABase64(bytesSalida);
-  const totalChunks = Math.max(1, Math.ceil(base64.length / RESPALDO_CHUNK_CHARS));
-
-  for (let i = 0; i < totalChunks; i++) {
-    const data = base64.slice(i * RESPALDO_CHUNK_CHARS, (i + 1) * RESPALDO_CHUNK_CHARS);
-    await setDoc(doc(db, "certificaciones", certificacionId, "archivo", String(i)), {
-      data,
-      indice: i,
-      totalChunks
-    });
-  }
-  return true;
-}
-
-// Reconstruye el PDF final a partir de los fragmentos guardados en Firestore.
-// Devuelve un Blob "application/pdf", o null si no hay respaldo para ese ID.
-async function obtenerPdfDesdeFirestore(certificacionId) {
-  const snap = await getDocs(collection(db, "certificaciones", certificacionId, "archivo"));
-  if (snap.empty) return null;
-
-  const fragmentos = [];
-  snap.forEach(d => fragmentos.push(d.data()));
-  fragmentos.sort((a, b) => a.indice - b.indice);
-
-  const base64 = fragmentos.map(f => f.data).join("");
-  return new Blob([base64ABytes(base64)], { type: "application/pdf" });
-}
-
-// Elimina los fragmentos del PDF respaldado (usado al borrar un registro).
-async function eliminarPdfRespaldadoDeFirestore(certificacionId) {
-  const snap = await getDocs(collection(db, "certificaciones", certificacionId, "archivo"));
-  for (const d of snap.docs) {
-    await deleteDoc(d.ref);
-  }
-}
-
 async function guardarResultado(bytesSalida,nombre,handleDestino) {
   const blob = new Blob([bytesSalida],{type:"application/pdf"});
 
@@ -1511,9 +1440,11 @@ btnAplicar.addEventListener("click",async () => {
     const resultado = await aplicarSelloAUnPdf(archivoSeleccionado.file);
     const sha256 = await calcularSHA256(resultado.bytesSalida);
 
-    // ── El PDF final se respalda en Firestore (fragmentado en Base64) ─────
-    // en vez de subirse a Firebase Storage, que exige activar el plan Blaze
-    // solo para habilitarse. Ver respaldarPdfEnFirestore() más abajo.
+    // ── El PDF final NO se respalda en el sistema (Firebase Storage) ──────
+    // Por decisión operativa, el único ejemplar del PDF certificado queda
+    // en el equipo del certificador. El sistema solo conserva el registro
+    // (metadatos + SHA-256) en Firestore, para poder verificar integridad
+    // sin necesitar el archivo en sí.
     const registro = {
       ...resultado.meta,
       sha256,
@@ -1532,34 +1463,19 @@ btnAplicar.addEventListener("click",async () => {
     };
 
     await setDoc(doc(db,"certificaciones",resultado.meta.id),registro);
-
-    let respaldado = false;
-    try {
-      respaldado = await respaldarPdfEnFirestore(resultado.meta.id, resultado.bytesSalida);
-    } catch (errRespaldo) {
-      // Si falla el respaldo (por ejemplo, sin conexión), la certificación
-      // ya quedó registrada y el archivo local se sigue entregando igual;
-      // solo no habrá copia en el sistema para ese registro.
-      console.error("No se pudo respaldar el PDF en Firestore:", errRespaldo);
-    }
-
     await guardarResultado(resultado.bytesSalida,nombreDestino,handleDestino);
 
     limpiarArchivo();
 
-    const notaRespaldo = respaldado
-      ? " El PDF final también quedó respaldado en el sistema (disponible en Historial, sin costo adicional)."
-      : " El PDF final quedó guardado únicamente en este equipo.";
-
     if (duplicadosDetectados.length) {
       mostrarEstado(
         "Recertificación registrada. Quedó constancia permanente del motivo y de los identificadores previos: " +
-        duplicadosDetectados.map(c => c.registro.id || c.docId).join(", ") + "." + notaRespaldo,
+        duplicadosDetectados.map(c => c.registro.id || c.docId).join(", ") + ". El PDF final quedó guardado únicamente en este equipo.",
         "ok"
       );
     } else {
       mostrarEstado(
-        "Certificación registrada correctamente. El identificador y SHA-256 fueron almacenados automáticamente." + notaRespaldo,
+        "Certificación registrada correctamente. El identificador y SHA-256 fueron almacenados automáticamente. El PDF final quedó guardado únicamente en este equipo.",
         "ok"
       );
     }
@@ -1801,9 +1717,6 @@ function renderHistorialPagina() {
         <strong>${escapeHtml(r.certificadorNombre || "")}</strong><br>
         <span>${escapeHtml(r.certificadorEmail || "")}</span>
       </div>
-      <div class="history-acciones">
-        <button type="button" class="btn-ver-pdf-historial" data-ver-pdf="${escapeHtml(r.id)}">Ver PDF</button>
-      </div>
     </div>
   `).join("");
 
@@ -1977,19 +1890,11 @@ async function eliminarSeleccionadosAdmin() {
     for (const id of ids) {
       await deleteDoc(doc(db,"certificaciones",id));
       try {
-        await eliminarPdfRespaldadoDeFirestore(id);
-      } catch (errPdf) {
-        // El PDF respaldado puede no existir (certificaciones anteriores a
-        // esta función, o el respaldo falló en su momento): no se considera
-        // un error que detenga la eliminación del registro.
-        console.warn(`No se eliminó el PDF respaldado de ${id}:`, errPdf?.code || errPdf);
-      }
-      try {
-        // Compatibilidad con respaldos antiguos hechos en Firebase Storage
-        // (versión 2.1.0, ya discontinuada).
         await deleteObject(storageRef(storage, `certificaciones/${id}.pdf`));
-      } catch (errStoragePdf) {
-        // No existe (caso normal) o Storage no está habilitado: se ignora.
+      } catch (errPdf) {
+        // El PDF puede no existir en Storage (certificaciones anteriores a esta
+        // función, o el respaldo falló en su momento): no se considera un error.
+        console.warn(`No se eliminó el PDF respaldado de ${id}:`, errPdf?.code || errPdf);
       }
     }
     estado.textContent = `Se eliminaron ${ids.length} registro(s), incluyendo su PDF respaldado cuando existía.`;
@@ -2023,36 +1928,6 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
 
 document.querySelectorAll("[data-go]").forEach(btn => {
   btn.addEventListener("click", () => mostrarPagina(btn.dataset.go));
-});
-
-// Delegación de eventos: el Historial se vuelve a pintar en cada carga/filtro,
-// así que el botón "Ver PDF" se escucha desde el contenedor fijo, no desde
-// cada botón individual (que se destruye y recrea con cada render).
-$("historialLista").addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-ver-pdf]");
-  if (!btn) return;
-
-  const id = btn.dataset.verPdf;
-  const textoOriginal = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Cargando…";
-
-  try {
-    const blob = await obtenerPdfDesdeFirestore(id);
-    if (!blob) {
-      alert("Este registro no tiene un PDF respaldado en el sistema (certificado antes de activar el respaldo, o el archivo era demasiado grande). El único ejemplar queda en el equipo del certificador que lo generó.");
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  } catch (err) {
-    console.error(err);
-    alert("No se pudo obtener el PDF respaldado. " + (err.message || ""));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = textoOriginal;
-  }
 });
 
 $("btnActualizarHistorial").addEventListener("click", cargarHistorial);

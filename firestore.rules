@@ -42,21 +42,6 @@ service cloud.firestore {
 
       allow update: if false;
       allow delete: if esAdministrador();
-
-      // Fragmentos Base64 del PDF final, respaldado en Firestore en vez de
-      // Firebase Storage (que exige el plan de pago Blaze solo para
-      // habilitarse). Cada fragmento es un documento independiente dentro
-      // de certificaciones/{certificacionId}/archivo/{n}.
-      match /archivo/{fragmentoId} {
-        // Solo el personal autorizado puede ver/descargar el PDF respaldado
-        // (a diferencia del registro, este no es de consulta pública).
-        allow get: if esAdministrador() || esCertificador();
-        allow list: if esAdministrador() || esCertificador();
-
-        allow create: if esCertificador();
-        allow update: if false;
-        allow delete: if esAdministrador() || esCertificador();
-      }
     }
 
     match /{document=**} {
