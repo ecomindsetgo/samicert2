@@ -1108,7 +1108,7 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(logo, Math.round(cx - w / 2), Math.round(cy - h / 2), w, h);
     ctx.imageSmoothingEnabled = false;
-
+  }
 
   return canvas.toDataURL("image/png");
 }
