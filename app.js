@@ -1041,17 +1041,39 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
     const cx = quiet + qrSize / 2;
     const cy = quiet + qrSize / 2;
 
-    // Pequeña base blanca, muy discreta, solo detrás del emblema para mantener contraste.
+    // Base clara y discreta detrás del emblema, con esquinas redondeadas
+    // en vez de un rectángulo duro, para que se note lo mínimo posible
+    // y solo aporte contraste al logo.
     const margen = Math.max(2, Math.round(cell * 0.8));
-    ctx.fillStyle = "rgba(255,255,255,0.94)";
-    ctx.fillRect(
-      Math.round(cx - w / 2 - margen),
-      Math.round(cy - h / 2 - margen),
-      w + margen * 2,
-      h + margen * 2
-    );
+    const bx = Math.round(cx - w / 2 - margen);
+    const by = Math.round(cy - h / 2 - margen);
+    const bw = w + margen * 2;
+    const bh = h + margen * 2;
+    const radio = Math.round(Math.min(bw, bh) * 0.22);
 
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(bx, by, bw, bh, radio);
+    } else {
+      // Alternativa manual por si el navegador no soporta roundRect.
+      const r = radio;
+      ctx.moveTo(bx + r, by);
+      ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
+      ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
+      ctx.arcTo(bx, by + bh, bx, by, r);
+      ctx.arcTo(bx, by, bx + bw, by, r);
+      ctx.closePath();
+    }
+    ctx.fill();
+
+    // Suavizado activado SOLO para el logo: los módulos del QR se dibujan
+    // con fillRect (no les afecta), pero el logo se reduce mucho desde su
+    // resolución original y sin suavizado se veía pixelado/con moiré.
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(logo, Math.round(cx - w / 2), Math.round(cy - h / 2), w, h);
+    ctx.imageSmoothingEnabled = false;
   }
 
   return canvas.toDataURL("image/png");
