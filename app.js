@@ -105,7 +105,7 @@ let pdfFirmadoSeleccionado = null;
 // (90pt → 2.9cm), 109pt equivale a ≈3.5x3.5 cm impresos: más visible que
 // antes sin llegar al tamaño real del sello físico. Si al probarlo aún se
 // ve pequeño, subir a ~124pt (≈4x4 cm); si se ve grande, bajar hacia 90-100pt.
-const TAMANO_SELLO_PT = 124;
+const TAMANO_SELLO_PT = 109;
 const MARGEN_SELLO_PT = 3;
 const ESQUINA_SELLO = "inferior-derecha";
 let esAdministradorActual = false;
