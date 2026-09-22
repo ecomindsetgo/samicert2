@@ -972,7 +972,7 @@ async function cargarLogoParaQR() {
   }
 }
 
-async function generarQRDataUrl(texto, tamanoPx = 320) {
+async function generarQRDataUrl(texto, tamanoPx = 720) {
   // Corrección de errores nivel "H" (~30 %): permite tapar el centro con el emblema
   // y que el QR siga siendo legible.
   const qr = qrcode(0, "H");
@@ -996,8 +996,8 @@ async function generarQRDataUrl(texto, tamanoPx = 320) {
 
   const logo = await cargarLogoParaQR();
   if (logo) {
-    // El emblema ocupa ~20 % del ancho del QR (≈4 % de su área) sobre un fondo blanco
-    const caja = Math.round(size * 0.20);
+    // El emblema ocupa ~28 % del ancho del QR, manteniendo corrección H y un margen blanco de seguridad
+    const caja = Math.round(size * 0.28);
     const escala = Math.min(caja / logo.width, caja / logo.height);
     const w = Math.round(logo.width * escala), h = Math.round(logo.height * escala);
     const margen = Math.max(3, Math.round(size * 0.015));
@@ -1173,7 +1173,7 @@ async function crearPaginaCaratula(pdfDoc, resumen) {
   y -= 28;
 
   try {
-    const qrBytes = dataUrlABytes(await generarQRDataUrl(resumen.consultaUrl, 480));
+    const qrBytes = dataUrlABytes(await generarQRDataUrl(resumen.consultaUrl, 720));
     const qrImg = await pdfDoc.embedPng(qrBytes);
     const qrTam = 130;
     pagina.drawImage(qrImg, { x: width / 2 - qrTam / 2, y: y - qrTam, width: qrTam, height: qrTam });
