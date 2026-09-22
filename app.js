@@ -1094,8 +1094,8 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
 
     // Medallón ovalado, pequeño y limpio. El margen es deliberadamente corto:
     // protege al logo sin crear el efecto visual de un parche grande.
-    const margenX = Math.max(3, Math.round(cell * 0.65));
-    const margenY = Math.max(3, Math.round(cell * 0.65));
+    const margenX = Math.max(3, Math.round(cell * 0.7));
+    const margenY = Math.max(3, Math.round(cell * 0.7));
     const bw = w + margenX * 2;
 const bh = h + margenY * 2;
 const radio = Math.max(bw, bh) / 2;   // <-- círculo perfecto, no óvalo
