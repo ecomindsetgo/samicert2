@@ -1084,7 +1084,7 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
   if (logo) {
     // El logo se usa como PNG RGBA de alta resolución y sin fondo blanco.
     // Un tamaño moderado evita cubrir demasiados módulos aunque la corrección sea H.
-    const caja = Math.round(qrSize * 0.23);
+    const caja = Math.round(qrSize * 0.30);
     const escala = Math.min(caja / logo.width, caja / logo.height);
     const w = Math.round(logo.width * escala);
     const h = Math.round(logo.height * escala);
