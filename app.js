@@ -1082,32 +1082,39 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
 
   const logo = await cargarLogoParaQR();
   if (logo) {
-    // El logo se usa como PNG RGBA de alta resolución y sin fondo blanco.
-    // Un tamaño moderado evita cubrir demasiados módulos aunque la corrección sea H.
-    const caja = Math.round(qrSize * 0.30);
+    // Versión refinada: el logo ocupa menos área para que el QR conserve
+    // muchos módulos visibles y el centro se perciba como parte del diseño.
+    // La corrección H se mantiene como respaldo frente al área cubierta.
+    const caja = Math.round(qrSize * 0.17);
     const escala = Math.min(caja / logo.width, caja / logo.height);
     const w = Math.round(logo.width * escala);
     const h = Math.round(logo.height * escala);
     const cx = quiet + qrSize / 2;
     const cy = quiet + qrSize / 2;
 
-    // Base blanca sólida y cuadrada detrás del emblema. Se evita cualquier
-    // redondeo para que el fondo del logo del QR tenga esquinas rectas.
-    const margen = Math.max(2, Math.round(cell * 0.8));
-    const bx = Math.round(cx - w / 2 - margen);
-    const by = Math.round(cy - h / 2 - margen);
-    const bw = w + margen * 2;
-    const bh = h + margen * 2;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(bx, by, bw, bh);
+    // Medallón ovalado, pequeño y limpio. El margen es deliberadamente corto:
+    // protege al logo sin crear el efecto visual de un parche grande.
+    const margenX = Math.max(3, Math.round(cell * 0.42));
+    const margenY = Math.max(3, Math.round(cell * 0.42));
+    const bw = w + margenX * 2;
+    const bh = h + margenY * 2;
+    const rx = bw / 2;
+    const ry = bh / 2;
 
-    // Suavizado activado SOLO para el logo: los módulos del QR se dibujan
-    // con fillRect (no les afecta), pero el logo se reduce mucho desde su
-    // resolución original y sin suavizado se veía pixelado/con moiré.
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.restore();
+
+    // El logo se dibuja suavizado, pero los módulos del QR permanecen
+    // perfectamente definidos para conservar una lectura fiable.
+    ctx.save();
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(logo, Math.round(cx - w / 2), Math.round(cy - h / 2), w, h);
-    ctx.imageSmoothingEnabled = false;
+    ctx.restore();
   }
 
   return canvas.toDataURL("image/png");
