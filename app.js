@@ -1096,9 +1096,9 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
     // protege al logo sin crear el efecto visual de un parche grande.
     const margenX = Math.max(3, Math.round(cell * 0.42));
     const margenY = Math.max(3, Math.round(cell * 0.42));
-    const bw = w + margenX * 2;
-const bh = h + margenY * 2;
-const radio = Math.max(bw, bh) / 2;   // <-- círculo perfecto, no óvalo
+    const bw = w + margenX * 2.5;
+const bh = h + margenY * 2.5;
+const radio = Math.max(bw, bh) / 2.5;   // <-- círculo perfecto, no óvalo
 
 ctx.save();
 ctx.beginPath();
