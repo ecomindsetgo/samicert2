@@ -1097,16 +1097,15 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
     const margenX = Math.max(3, Math.round(cell * 0.42));
     const margenY = Math.max(3, Math.round(cell * 0.42));
     const bw = w + margenX * 2;
-    const bh = h + margenY * 2;
-    const rx = bw / 2;
-    const ry = bh / 2;
+const bh = h + margenY * 2;
+const radio = Math.max(bw, bh) / 2;   // <-- círculo perfecto, no óvalo
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffffff";
-    ctx.fill();
-    ctx.restore();
+ctx.save();
+ctx.beginPath();
+ctx.arc(cx, cy, radio, 0, Math.PI * 2);   // arc en vez de ellipse
+ctx.fillStyle = "#ffffff";
+ctx.fill();
+ctx.restore();
 
     // El logo se dibuja suavizado, pero los módulos del QR permanecen
     // perfectamente definidos para conservar una lectura fiable.
