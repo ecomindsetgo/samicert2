@@ -99,7 +99,13 @@ let selloBytes = null;
 let procesoFirmaPendiente = null;
 let pdfFirmadoSeleccionado = null;
 
-const TAMANO_SELLO_PT = 90;
+// El sello físico mide 5x5 cm. En pruebas de impresión, 90pt se imprimió
+// como 2.9x2.9 cm (la escala real de impresión depende del PDF/impresora,
+// no coincide 1:1 con 1cm = 28.35pt). Usando esa proporción observada
+// (90pt → 2.9cm), 109pt equivale a ≈3.5x3.5 cm impresos: más visible que
+// antes sin llegar al tamaño real del sello físico. Si al probarlo aún se
+// ve pequeño, subir a ~124pt (≈4x4 cm); si se ve grande, bajar hacia 90-100pt.
+const TAMANO_SELLO_PT = 109;
 const MARGEN_SELLO_PT = 3;
 const ESQUINA_SELLO = "inferior-derecha";
 let esAdministradorActual = false;
@@ -1128,10 +1134,10 @@ async function crearPaginaCaratula(pdfDoc, resumen) {
     ["TOTAL DE FOLIOS:", String(resumen.totalPaginas)],
     ["FOLIOS CERTIFICADOS:", String(resumen.totalCertificadas)]
   ];
-  filas.forEach(([etiqueta, valor]) => {
+  filas.forEach(([etiqueta, valor], i) => {
     pagina.drawText(etiqueta, { x: margenX, y, size: 10, font: fTitulo, color: azul });
     pagina.drawText(String(valor), { x: margenX + 215, y, size: 10, font: fTexto, color: textoInk });
-    y -= 20;
+    y -= (i === filas.length - 1) ? 13 : 20;
   });
 
   const notaEmision = "(DOCUMENTOS EMITIDOS POR LA ENTIDAD)";
