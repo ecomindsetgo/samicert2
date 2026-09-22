@@ -98,6 +98,9 @@ let perfilActual = null;
 let selloBytes = null;
 let procesoFirmaPendiente = null;
 let pdfFirmadoSeleccionado = null;
+let temporizadorHashResultado = null;
+let temporizadorHashResultadoMesa = null;
+const TIEMPO_MENSAJE_EXITO_MS = 12000;
 
 // El sello físico mide 5x5 cm. En pruebas de impresión, 90pt se imprimió
 // como 2.9x2.9 cm (la escala real de impresión depende del PDF/impresora,
@@ -327,7 +330,31 @@ function confirmarRecertificacion(coincidencias, solapadas) {
 }
 
 function ocultarHash() {
-  $("hashResultado").classList.add("oculto");
+  if (temporizadorHashResultado) {
+    clearTimeout(temporizadorHashResultado);
+    temporizadorHashResultado = null;
+  }
+  if (temporizadorHashResultadoMesa) {
+    clearTimeout(temporizadorHashResultadoMesa);
+    temporizadorHashResultadoMesa = null;
+  }
+  $("hashResultado")?.classList.add("oculto");
+  $("hashResultadoMesa")?.classList.add("oculto");
+}
+
+function mostrarMensajeExitoTemporal(mensaje) {
+  const box = $("hashResultado");
+  if (!box) return;
+  if (temporizadorHashResultado) clearTimeout(temporizadorHashResultado);
+  box.classList.remove("oculto");
+  box.style.borderLeftColor = "#16823a";
+  box.style.background = "#f6fbf8";
+  box.innerHTML = `<div class="hash-titulo" style="color:#16823a">${escapeHtml(mensaje)}</div>`;
+  temporizadorHashResultado = setTimeout(() => {
+    box.classList.add("oculto");
+    box.innerHTML = "";
+    temporizadorHashResultado = null;
+  }, TIEMPO_MENSAJE_EXITO_MS);
 }
 
 function mostrarEstado(mensaje, tipo="ok") {
@@ -972,40 +999,61 @@ async function cargarLogoParaQR() {
   }
 }
 
-async function generarQRDataUrl(texto, tamanoPx = 720) {
-  // Corrección de errores nivel "H" (~30 %): permite tapar el centro con el emblema
-  // y que el QR siga siendo legible.
+async function generarQRDataUrl(texto, tamanoPx = 1200) {
+  // QR de alta resolución, con zona de silencio de 4 módulos y corrección H.
+  // La zona de silencio mejora la apariencia y también ayuda a los lectores QR.
   const qr = qrcode(0, "H");
   qr.addData(texto);
   qr.make();
   const count = qr.getModuleCount();
-  const cell = Math.max(1, Math.floor(tamanoPx / count));
-  const size = cell * count;
+  const quietModules = 4;
+  const cell = Math.max(1, Math.floor(tamanoPx / (count + quietModules * 2)));
+  const qrSize = cell * count;
+  const quiet = cell * quietModules;
+  const size = qrSize + quiet * 2;
+
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+
+  // Fondo blanco limpio y módulos negros de alto contraste.
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, size, size);
-  ctx.fillStyle = "#0b1b2b";
+  ctx.fillStyle = "#111111";
   for (let r = 0; r < count; r++) {
     for (let c = 0; c < count; c++) {
-      if (qr.isDark(r, c)) ctx.fillRect(c * cell, r * cell, cell, cell);
+      if (qr.isDark(r, c)) {
+        ctx.fillRect(quiet + c * cell, quiet + r * cell, cell, cell);
+      }
     }
   }
 
   const logo = await cargarLogoParaQR();
   if (logo) {
-    // El emblema ocupa ~28 % del ancho del QR, manteniendo corrección H y un margen blanco de seguridad
-    const caja = Math.round(size * 0.28);
+    // El logo se usa como PNG RGBA de alta resolución y sin fondo blanco.
+    // Un tamaño moderado evita cubrir demasiados módulos aunque la corrección sea H.
+    const caja = Math.round(qrSize * 0.23);
     const escala = Math.min(caja / logo.width, caja / logo.height);
-    const w = Math.round(logo.width * escala), h = Math.round(logo.height * escala);
-    const margen = Math.max(3, Math.round(size * 0.015));
-    const cx = size / 2, cy = size / 2;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(Math.round(cx - w / 2 - margen), Math.round(cy - h / 2 - margen), w + margen * 2, h + margen * 2);
+    const w = Math.round(logo.width * escala);
+    const h = Math.round(logo.height * escala);
+    const cx = quiet + qrSize / 2;
+    const cy = quiet + qrSize / 2;
+
+    // Pequeña base blanca, muy discreta, solo detrás del emblema para mantener contraste.
+    const margen = Math.max(2, Math.round(cell * 0.8));
+    ctx.fillStyle = "rgba(255,255,255,0.94)";
+    ctx.fillRect(
+      Math.round(cx - w / 2 - margen),
+      Math.round(cy - h / 2 - margen),
+      w + margen * 2,
+      h + margen * 2
+    );
+
     ctx.drawImage(logo, Math.round(cx - w / 2), Math.round(cy - h / 2), w, h);
   }
+
   return canvas.toDataURL("image/png");
 }
 
@@ -1455,9 +1503,26 @@ function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, fireba
       ${resultado.verificado ? "✓ Se verificó el tamaño y la huella del archivo después de guardarlo." : ""}
     </div>
     ${estadoFirebase}`;
+
+  if (esUsuarioMesaPartes()) {
+    if (temporizadorHashResultadoMesa) clearTimeout(temporizadorHashResultadoMesa);
+    temporizadorHashResultadoMesa = setTimeout(() => {
+      box.classList.add("oculto");
+      box.innerHTML = "";
+      temporizadorHashResultadoMesa = null;
+    }, TIEMPO_MENSAJE_EXITO_MS);
+  } else {
+    if (temporizadorHashResultado) clearTimeout(temporizadorHashResultado);
+    temporizadorHashResultado = setTimeout(() => {
+      box.classList.add("oculto");
+      box.innerHTML = "";
+      temporizadorHashResultado = null;
+    }, TIEMPO_MENSAJE_EXITO_MS);
+  }
 }
 
 btnAplicar.addEventListener("click", async () => {
+  ocultarHash();
   if (!archivoSeleccionado || !usuarioActual || esUsuarioMesaPartes()) return;
 
   btnAplicar.disabled = true;
@@ -1558,9 +1623,8 @@ btnAplicar.addEventListener("click", async () => {
     renderLista();
 
     if (panelFirma) panelFirma.classList.add("oculto");
-    mostrarEstado(
-      `✓ Documento ${pendienteId} guardado en la carpeta compartida (${resultadoGuardado.nombre}) y enviado a Mesa de Partes para firma digital. El certificador no registra la certificación definitiva.`,
-      "ok"
+    mostrarMensajeExitoTemporal(
+      `✓ Documento ${pendienteId} guardado en la carpeta compartida (${resultadoGuardado.nombre}) y enviado a Mesa de Partes para firma digital. El certificador no registra la certificación definitiva.`
     );
     cargarMisPendientesFirma();
   } catch (err) {
@@ -1815,6 +1879,7 @@ $("btnCancelarFirmaMesa")?.addEventListener("click", () => {
 });
 
 btnRegistrarFirmado?.addEventListener("click", async () => {
+  ocultarHash();
   if (!pendienteFirmaActual || !pdfFirmadoSeleccionado || !usuarioActual || !esUsuarioMesaPartes()) return;
 
   btnRegistrarFirmado.disabled = true;
@@ -2395,8 +2460,17 @@ function mostrarPagina(nombre) {
 
   if (nombre === "historial") cargarHistorial();
   if (nombre === "administracion") cargarAdministracion();
-  if (nombre === "firmar") { cargarPendientesFirma(); cargarMisDocumentosFirmados(); }
-  if (nombre === "certificar") cargarMisPendientesFirma();
+  if (nombre === "firmar") {
+    $("hashResultadoMesa")?.classList.add("oculto");
+    if (temporizadorHashResultadoMesa) { clearTimeout(temporizadorHashResultadoMesa); temporizadorHashResultadoMesa = null; }
+    cargarPendientesFirma();
+    cargarMisDocumentosFirmados();
+  }
+  if (nombre === "certificar") {
+    $("hashResultado")?.classList.add("oculto");
+    if (temporizadorHashResultado) { clearTimeout(temporizadorHashResultado); temporizadorHashResultado = null; }
+    cargarMisPendientesFirma();
+  }
   window.scrollTo({top:0,behavior:"smooth"});
 }
 
