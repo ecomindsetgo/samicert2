@@ -1085,24 +1085,21 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
     // Versión refinada: el logo ocupa menos área para que el QR conserve
     // muchos módulos visibles y el centro se perciba como parte del diseño.
     // La corrección H se mantiene como respaldo frente al área cubierta.
-    const caja = Math.round(qrSize * 0.17);
+    const caja = Math.round(qrSize * 0.22);
     const escala = Math.min(caja / logo.width, caja / logo.height);
     const w = Math.round(logo.width * escala);
     const h = Math.round(logo.height * escala);
     const cx = quiet + qrSize / 2;
     const cy = quiet + qrSize / 2;
 
-    // Medallón ovalado, pequeño y limpio. El margen es deliberadamente corto:
-    // protege al logo sin crear el efecto visual de un parche grande.
-    const margenX = Math.max(3, Math.round(cell * 0.7));
-    const margenY = Math.max(3, Math.round(cell * 0.7));
-    const bw = w + margenX * 2;
-const bh = h + margenY * 2;
-const radio = Math.max(bw, bh) / 2;   // <-- círculo perfecto, no óvalo
+    // Medallón cuadrado con esquinas ligeramente redondeadas.
+const margen = Math.max(3, Math.round(cell * 0.6));
+const lado = Math.max(w, h) + margen * 2;
+const radioEsquina = Math.round(lado * 0.15); // 0.15 = "ligeramente" redondeado
 
 ctx.save();
 ctx.beginPath();
-ctx.arc(cx, cy, radio, 0, Math.PI * 2);   // arc en vez de ellipse
+ctx.roundRect(cx - lado / 2, cy - lado / 2, lado, lado, radioEsquina);
 ctx.fillStyle = "#ffffff";
 ctx.fill();
 ctx.restore();
@@ -1285,7 +1282,7 @@ async function crearPaginaCaratula(pdfDoc, resumen) {
   try {
     const qrBytes = dataUrlABytes(await generarQRDataUrl(resumen.consultaUrl, 1000));
     const qrImg = await pdfDoc.embedPng(qrBytes);
-    const qrTam = 130;
+    const qrTam = 160;
     pagina.drawImage(qrImg, { x: width / 2 - qrTam / 2, y: y - qrTam, width: qrTam, height: qrTam });
     y -= qrTam + 14;
   } catch (e) {
