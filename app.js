@@ -846,7 +846,14 @@ async function seleccionarPdf(file) {
   }
 }
 
-function limpiarArchivo() {
+function limpiarArchivo(opciones) {
+  // Se usa tanto para el botón "Quitar documento" (opciones = evento de click,
+  // por eso se ignora si no trae la forma esperada) como, con
+  // { mantenerMensaje: true }, justo después de generar el documento para
+  // firma: en ese caso NO se debe llamar a ocultarHash(), porque borraría de
+  // inmediato el mensaje de éxito recién mostrado.
+  const mantenerMensaje = !!(opciones && opciones.mantenerMensaje);
+
   if (resultadoBlob) URL.revokeObjectURL(resultadoBlob);
   archivoSeleccionado = null;
   resultadoBlob = null;
@@ -861,7 +868,7 @@ function limpiarArchivo() {
   $("selectorPaginas").classList.add("oculto");
   $("visorPaginas").innerHTML = "";
   $("resumenPaginas").textContent = "Selecciona las páginas que deseas sellar.";
-  ocultarHash();
+  if (!mantenerMensaje) ocultarHash();
   renderLista();
 }
 
@@ -1041,9 +1048,10 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
     const cx = quiet + qrSize / 2;
     const cy = quiet + qrSize / 2;
 
-    // Base clara y discreta detrás del emblema, con esquinas redondeadas
-    // en vez de un rectángulo duro, para que se note lo mínimo posible
-    // y solo aporte contraste al logo.
+    // Base blanca sólida detrás del emblema (con esquinas redondeadas en vez
+    // de un rectángulo duro). Un blanco semitransparente dejaba entrever los
+    // módulos negros del QR debajo y el logo se veía apagado/grisáceo, así
+    // que aquí se usa blanco 100% opaco para que el logo se distinga bien.
     const margen = Math.max(2, Math.round(cell * 0.8));
     const bx = Math.round(cx - w / 2 - margen);
     const by = Math.round(cy - h / 2 - margen);
@@ -1051,7 +1059,7 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
     const bh = h + margen * 2;
     const radio = Math.round(Math.min(bw, bh) * 0.22);
 
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.fillStyle = "#ffffff";
     ctx.beginPath();
     if (ctx.roundRect) {
       ctx.roundRect(bx, by, bw, bh, radio);
@@ -1243,7 +1251,7 @@ async function crearPaginaCaratula(pdfDoc, resumen) {
   y -= 28;
 
   try {
-    const qrBytes = dataUrlABytes(await generarQRDataUrl(resumen.consultaUrl, 720));
+    const qrBytes = dataUrlABytes(await generarQRDataUrl(resumen.consultaUrl, 1000));
     const qrImg = await pdfDoc.embedPng(qrBytes);
     const qrTam = 130;
     pagina.drawImage(qrImg, { x: width / 2 - qrTam / 2, y: y - qrTam, width: qrTam, height: qrTam });
@@ -1648,6 +1656,9 @@ btnAplicar.addEventListener("click", async () => {
     mostrarMensajeExitoTemporal(
       `✓ Documento ${pendienteId} guardado en la carpeta compartida (${resultadoGuardado.nombre}) y enviado a Mesa de Partes para firma digital. El certificador no registra la certificación definitiva.`
     );
+    // Igual que el mensaje, el documento y las páginas a certificar no deben
+    // quedarse pegados en pantalla una vez enviado a Mesa de Partes.
+    limpiarArchivo({ mantenerMensaje: true });
     cargarMisPendientesFirma();
   } catch (err) {
     console.error(err);
