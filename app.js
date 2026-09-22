@@ -639,6 +639,8 @@ async function abrirVistaAmpliada(numero) {
     await renderPaginaModal(pagina);
     $("visorModalTitulo").textContent = `Página ${numero} — vista ampliada`;
     $("visorModal").classList.remove("oculto");
+    actualizarControlesNavegacionModal();
+    actualizarBotonSeleccionModal();
     document.body.style.overflow = "hidden";
   } catch (error) {
     console.error(error);
@@ -672,6 +674,42 @@ function actualizarIndicadorRotacion(numero) {
   const giro = Number(rotacionesPagina.get(numero) || 0);
   const titulo = $("visorModalTitulo");
   if (titulo) titulo.textContent = `Página ${numero} — vista ampliada${giro ? ` — giro adicional: ${giro}°` : ""}`;
+  actualizarControlesNavegacionModal();
+  actualizarBotonSeleccionModal();
+}
+
+function actualizarControlesNavegacionModal() {
+  const anterior = $("btnPaginaAnterior");
+  const siguiente = $("btnPaginaSiguiente");
+  if (!anterior || !siguiente || !visorModalPaginaActual) return;
+  anterior.disabled = visorModalPaginaActual <= 1;
+  siguiente.disabled = visorModalPaginaActual >= totalPaginas;
+}
+
+function actualizarBotonSeleccionModal() {
+  const boton = $("btnAlternarSeleccionModal");
+  if (!boton || !visorModalPaginaActual) return;
+  const seleccionada = paginasSeleccionadas.has(visorModalPaginaActual);
+  boton.textContent = seleccionada ? "✓ Certificar" : "○ No certificar";
+  boton.classList.toggle("activo", seleccionada);
+}
+
+async function cambiarPaginaModal(delta) {
+  if (!pdfVista || !visorModalPaginaActual) return;
+  const nueva = visorModalPaginaActual + delta;
+  if (nueva < 1 || nueva > totalPaginas) return;
+  await abrirVistaAmpliada(nueva);
+}
+
+function alternarSeleccionDesdeModal() {
+  if (!visorModalPaginaActual) return;
+  const numero = visorModalPaginaActual;
+  const card = visorPaginas().querySelector(`.pagina-card[data-page="${numero}"]`);
+  const check = card?.querySelector(".pagina-check");
+  if (!check) return;
+  check.checked = !check.checked;
+  check.dispatchEvent(new Event("change", {bubbles:true}));
+  actualizarBotonSeleccionModal();
 }
 
 async function rotarPaginaParaSalida(numero) {
@@ -733,6 +771,9 @@ $("btnZoomMas").addEventListener("click", () => cambiarZoomModal(0.25));
 $("btnZoomMenos").addEventListener("click", () => cambiarZoomModal(-0.25));
 $("btnZoomAjustar").addEventListener("click", ajustarZoomModal);
 $("btnRotarModal").addEventListener("click", rotarVistaModal);
+$("btnPaginaAnterior").addEventListener("click", () => cambiarPaginaModal(-1));
+$("btnPaginaSiguiente").addEventListener("click", () => cambiarPaginaModal(1));
+$("btnAlternarSeleccionModal").addEventListener("click", alternarSeleccionDesdeModal);
 $("btnCerrarVisorModal").addEventListener("click", cerrarVistaAmpliada);
 
 $("visorModal").addEventListener("click", e => {
@@ -744,6 +785,8 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") cerrarVistaAmpliada();
   if (e.key === "+" || e.key === "=") cambiarZoomModal(0.25);
   if (e.key === "-") cambiarZoomModal(-0.25);
+  if (e.key === "ArrowLeft") cambiarPaginaModal(-1);
+  if (e.key === "ArrowRight") cambiarPaginaModal(1);
 });
 
 function resetearEstadoSesion() {
@@ -1048,32 +1091,15 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
     const cx = quiet + qrSize / 2;
     const cy = quiet + qrSize / 2;
 
-    // Base blanca sólida detrás del emblema (con esquinas redondeadas en vez
-    // de un rectángulo duro). Un blanco semitransparente dejaba entrever los
-    // módulos negros del QR debajo y el logo se veía apagado/grisáceo, así
-    // que aquí se usa blanco 100% opaco para que el logo se distinga bien.
+    // Base blanca sólida y cuadrada detrás del emblema. Se evita cualquier
+    // redondeo para que el fondo del logo del QR tenga esquinas rectas.
     const margen = Math.max(2, Math.round(cell * 0.8));
     const bx = Math.round(cx - w / 2 - margen);
     const by = Math.round(cy - h / 2 - margen);
     const bw = w + margen * 2;
     const bh = h + margen * 2;
-    const radio = Math.round(Math.min(bw, bh) * 0.22);
-
     ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    if (ctx.roundRect) {
-      ctx.roundRect(bx, by, bw, bh, radio);
-    } else {
-      // Alternativa manual por si el navegador no soporta roundRect.
-      const r = radio;
-      ctx.moveTo(bx + r, by);
-      ctx.arcTo(bx + bw, by, bx + bw, by + bh, r);
-      ctx.arcTo(bx + bw, by + bh, bx, by + bh, r);
-      ctx.arcTo(bx, by + bh, bx, by, r);
-      ctx.arcTo(bx, by, bx + bw, by, r);
-      ctx.closePath();
-    }
-    ctx.fill();
+    ctx.fillRect(bx, by, bw, bh);
 
     // Suavizado activado SOLO para el logo: los módulos del QR se dibujan
     // con fillRect (no les afecta), pero el logo se reduce mucho desde su
@@ -1082,7 +1108,7 @@ async function generarQRDataUrl(texto, tamanoPx = 1200) {
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(logo, Math.round(cx - w / 2), Math.round(cy - h / 2), w, h);
     ctx.imageSmoothingEnabled = false;
-  }
+
 
   return canvas.toDataURL("image/png");
 }
