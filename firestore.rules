@@ -93,8 +93,21 @@ service cloud.firestore {
       allow create: if esVistoBueno()
         && request.resource.data.vbUid == request.auth.uid
         && request.resource.data.estado == "pendiente-certificador";
-      allow update: if esAdministrador() || esCertificador() || (esVistoBueno() && resource.data.vbUid == request.auth.uid);
-      allow delete: if esAdministrador() || (esVistoBueno() && resource.data.vbUid == request.auth.uid && resource.data.estado in ["pendiente-certificador", "cancelado"]);
+      // El usuario de VB puede actualizar/cancelar únicamente sus propios registros.
+      // Se acepta UID o correo para mantener compatibilidad con registros creados
+      // en versiones anteriores que no guardaban vbUid.
+      allow update: if esAdministrador() || esCertificador() ||
+        (esVistoBueno() &&
+          ((resource.data.vbUid == request.auth.uid) ||
+           (resource.data.vbEmail == request.auth.token.email)));
+
+      // Raúl puede eliminar sus propios registros de VB mientras estén en su
+      // bandeja. También se permite por correo para registros antiguos.
+      allow delete: if esAdministrador() ||
+        (esVistoBueno() &&
+          ((resource.data.vbUid == request.auth.uid) ||
+           (resource.data.vbEmail == request.auth.token.email)) &&
+          resource.data.estado in ["pendiente-certificador", "cancelado"]);
     }
 
     match /certificaciones/{certificacionId} {

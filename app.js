@@ -2629,15 +2629,41 @@ async function cargarBandejaVB() {
   targets.forEach(el => el.innerHTML = '<div class="empty">Cargando documentos con Visto Bueno…</div>');
   try {
     const snap = await getDocs(collection(db, "documentosVB"));
+    const miEmail = (usuarioActual.email || "").toLowerCase();
     const rows = snap.docs.map(d=>({...d.data(), id:d.id}))
       .filter(r => esUsuarioVistoBueno()
-        ? ((r.vbUid && r.vbUid === usuarioActual.uid) || (r.vbEmail || '').toLowerCase() === (usuarioActual.email || '').toLowerCase() || (!r.vbUid && !r.vbEmail && ['pendiente-certificador','cancelado'].includes(r.estado)))
+        ? ((r.vbUid && r.vbUid === usuarioActual.uid) ||
+           ((r.vbEmail || "").toLowerCase() === miEmail) ||
+           (!r.vbUid && !r.vbEmail && ["pendiente-certificador","cancelado"].includes(r.estado)))
         : r.estado === "pendiente-certificador")
-      .sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
+      .sort((a,b)=>(fechaRegistroEnMs(b) - fechaRegistroEnMs(a)));
+
     targets.forEach(el => {
-      el.innerHTML = rows.length ? rows.map(r=>`<div class="firma-pendiente-item vb-pendiente-item"><div><div class="firma-pendiente-id">${escapeHtml(r.archivoVBNombre || r.archivoOriginal || "Documento")}</div><div class="history-meta">VB: ${escapeHtml(r.vbNombre||r.vbEmail||"Raúl Alberto Rodríguez Calderón")} · ${escapeHtml(r.fecha||"")} ${escapeHtml(r.hora||"")}</div></div><span class="vb-estado-sutil">${escapeHtml(r.estado||"Con VB")}</span>${esUsuarioVistoBueno()?`<div class="firma-pendiente-actions"><button class="btn-small btn-gray" type="button" data-vb-cancelar="${escapeHtml(r.id)}">Cancelar VB</button><button class="btn-small btn-danger" type="button" data-vb-eliminar="${escapeHtml(r.id)}">Eliminar registro</button></div>`:""}</div>`).join("") : '<div class="empty">No hay documentos con Visto Bueno registrados.</div>';
-      el.querySelectorAll("[data-vb-cancelar]").forEach(b=>b.addEventListener("click",()=>gestionarRegistroVB(b.dataset.vbCancelar,"cancelar")));
-      el.querySelectorAll("[data-vb-eliminar]").forEach(b=>b.addEventListener("click",()=>gestionarRegistroVB(b.dataset.vbEliminar,"eliminar")));
+      el.innerHTML = rows.length ? rows.map(r=>`
+        <div class="firma-pendiente-item vb-pendiente-item">
+          <div class="firma-pendiente-id">${escapeHtml(r.id)}</div>
+          <div>
+            <div class="history-file">${escapeHtml(r.archivoVBNombre || r.archivoOriginal || "Documento PDF")}</div>
+            <div class="history-meta">
+              ${escapeHtml(r.fecha || "")} ${escapeHtml(r.hora || "")} ·
+              Visto Bueno: <strong>${escapeHtml(r.vbNombre || r.vbEmail || "Raúl")}</strong>
+            </div>
+            <div class="history-meta" style="margin-top:2px">
+              Estado: <strong>${escapeHtml(r.estado === "cancelado" ? "Cancelado" : "Pendiente de certificador")}</strong>
+            </div>
+          </div>
+          ${esUsuarioVistoBueno() ? `<div class="firma-pendiente-actions">
+            <button type="button" class="btn-gray btn-small btn-vb-cancelar" data-id="${escapeHtml(r.id)}" ${r.estado === "cancelado" ? "disabled" : ""}>Cancelar</button>
+            <button type="button" class="btn-danger btn-small btn-vb-eliminar" data-id="${escapeHtml(r.id)}">Eliminar</button>
+          </div>` : `<span class="vb-estado-sutil">${escapeHtml(r.estado || "Con VB")}</span>`}
+        </div>`).join("") : '<div class="empty">No hay documentos con Visto Bueno registrados.</div>';
+
+      el.querySelectorAll(".btn-vb-cancelar:not([disabled])").forEach(b =>
+        b.addEventListener("click", () => gestionarRegistroVB(b.dataset.id, "cancelar"))
+      );
+      el.querySelectorAll(".btn-vb-eliminar").forEach(b =>
+        b.addEventListener("click", () => gestionarRegistroVB(b.dataset.id, "eliminar"))
+      );
     });
   } catch(e) { targets.forEach(el => el.innerHTML = `<div class="empty">No se pudo cargar la bandeja: ${escapeHtml(e.message||"")}</div>`); }
 }
