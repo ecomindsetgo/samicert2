@@ -2527,15 +2527,88 @@ function fechaRegistroEnMs(r) {
 async function cargarHistorialEtapasAdmin() {
   if (usuarioActual?.uid !== ADMIN_UID) return;
   const detalle = document.querySelector("#page-detalleUsuarios.active #historialDetalleUsuarios");
-  const cont = detalle || $("historialEtapasAdmin"); if (!cont) return;
+  const cont = detalle || $("historialEtapasAdmin");
+  if (!cont) return;
+
   try {
-    const [vbSnap, pendSnap, certSnap] = await Promise.all([getDocs(collection(db,"documentosVB")),getDocs(collection(db,"pendientesFirma")),getDocs(collection(db,"certificaciones"))]);
-    if (!detalle) { cont.innerHTML = `<div class="panel"><div class="panel-title">Certificaciones registradas</div><div class="history-meta">Total de certificaciones culminadas: <strong>${certSnap.size}</strong></div></div>`; return; }
+    const [vbSnap, pendSnap, certSnap] = await Promise.all([
+      getDocs(collection(db,"documentosVB")),
+      getDocs(collection(db,"pendientesFirma")),
+      getDocs(collection(db,"certificaciones"))
+    ]);
+
+    if (!detalle) {
+      const certificadosUnicos = deduplicarHistorialCertificaciones(
+        certSnap.docs.map(d => ({...d.data(), id:d.id}))
+      );
+      cont.innerHTML = `
+        <div class="panel admin-completed-panel">
+          <div class="panel-title">Completados</div>
+          <div class="history-meta">
+            Certificaciones definitivas registradas: <strong>${certificadosUnicos.length}</strong>
+          </div>
+          <div class="admin-list-note">El historial definitivo se muestra sin duplicar la misma certificación.</div>
+        </div>`;
+      return;
+    }
+
     const etapa = $("filtroDetalleEtapa")?.value || "vb";
-    const sets = {vb:{title:"Documentos con Visto Bueno",rows:vbSnap.docs.map(d=>({...d.data(),id:d.id})),user:r=>r.vbNombre||r.vbEmail||"Raúl",file:r=>r.archivoVBNombre||r.archivoOriginal||r.id},procesados:{title:"Documentos procesados por certificador",rows:pendSnap.docs.map(d=>({...d.data(),id:d.id})),user:r=>r.certificadorNombre||r.certificadorEmail||"No indicado",file:r=>r.archivoProvisionalNombre||r.archivoOriginal||r.id},mesa:{title:"Documentos con firma de Mesa de Partes",rows:certSnap.docs.map(d=>({...d.data(),id:d.id})),user:r=>r.firmanteNombre||r.firmanteEmail||"Mesa de Partes",file:r=>r.archivoCertificadoNombre||r.archivoOriginal||r.id}};
-    const data=sets[etapa]; const esc=v=>escapeHtml(v??"");
-    cont.innerHTML=`<div class="panel"><div class="panel-title">${data.title} (${data.rows.length})</div>${data.rows.length?data.rows.map(r=>`<div class="history-item"><div class="history-id">${esc(data.file(r))}</div><div class="history-meta">Usuario: ${esc(data.user(r))} · Fecha: ${esc(r.fecha||"")} ${esc(r.hora||"")}</div><div class="history-meta">Estado: ${esc(r.estado||data.title)}</div></div>`).join(""):'<div class="empty">No hay documentos registrados en esta etapa.</div>'}</div>`;
-  } catch(e) { cont.innerHTML=`<div class="empty">No se pudo cargar el detalle: ${escapeHtml(e.message||"")}</div>`; }
+    const sets = {
+      vb: {
+        title:"Documentos con Visto Bueno",
+        rows:vbSnap.docs.map(d=>({...d.data(),id:d.id})),
+        user:r=>r.vbNombre||r.vbEmail||"Raúl",
+        file:r=>r.archivoVBNombre||r.archivoOriginal||r.id
+      },
+      procesados: {
+        title:"Documentos procesados por certificador",
+        rows:pendSnap.docs.map(d=>({...d.data(),id:d.id})),
+        user:r=>r.certificadorNombre||r.certificadorEmail||"No indicado",
+        file:r=>r.archivoProvisionalNombre||r.archivoOriginal||r.id
+      },
+      mesa: {
+        title:"Completados — firma de Mesa de Partes",
+        rows:deduplicarHistorialCertificaciones(
+          certSnap.docs.map(d=>({...d.data(),id:d.id}))
+        ),
+        user:r=>r.firmanteNombre||r.firmanteEmail||"Mesa de Partes",
+        file:r=>r.archivoCertificadoNombre||r.archivoOriginal||r.id
+      }
+    };
+
+    const data=sets[etapa];
+    const esc=v=>escapeHtml(v??"");
+    const grupos=new Map();
+
+    for (const r of data.rows) {
+      const usuario=String(data.user(r)||"Sin usuario");
+      if (!grupos.has(usuario)) grupos.set(usuario,[]);
+      grupos.get(usuario).push(r);
+    }
+
+    const bloques=Array.from(grupos.entries()).map(([usuario,rows])=>`
+      <div class="admin-user-group">
+        <div class="admin-user-group-head">
+          <div><strong>${esc(usuario)}</strong><span class="admin-group-user">${esc(data.title)}</span></div>
+          <span class="admin-group-count">${rows.length} registro(s)</span>
+        </div>
+        ${rows.map(r=>`
+          <div class="history-item">
+            <div class="history-id">${esc(data.file(r))}</div>
+            <div class="history-meta">Fecha: ${esc(r.fecha||"")} ${esc(r.hora||"")}</div>
+            <div class="history-meta">Estado: ${esc(r.estado||data.title)}</div>
+          </div>
+        `).join("")}
+      </div>`).join("");
+
+    cont.innerHTML=`
+      <div class="panel">
+        <div class="panel-title">${esc(data.title)} (${data.rows.length})</div>
+        ${bloques || '<div class="empty">No hay documentos registrados en esta etapa.</div>'}
+      </div>`;
+  } catch(e) {
+    cont.innerHTML=`<div class="empty">No se pudo cargar el detalle: ${escapeHtml(e.message||"")}</div>`;
+  }
 }
 
 async function gestionarRegistroVB(id, accion) {
@@ -2571,6 +2644,36 @@ async function cargarBandejaVB() {
   } catch(e) { targets.forEach(el => el.innerHTML = `<div class="empty">No se pudo cargar la bandeja: ${escapeHtml(e.message||"")}</div>`); }
 }
 
+function claveCertificacionHistorial(r) {
+  // Una certificación definitiva se identifica primero por su huella final.
+  // Si registros antiguos no tienen SHA-256, se usan los metadatos que
+  // identifican la misma operación. Esto evita mostrar dos veces el mismo
+  // registro sin ocultar recertificaciones reales.
+  const shaFinal = String(r.sha256 || "").trim().toLowerCase();
+  if (shaFinal) return `sha256:${shaFinal}`;
+  const certificacionId = String(r.certificacionId || "").trim();
+  if (certificacionId) return `certificacion:${certificacionId}`;
+  return [
+    String(r.archivoOriginal || "").trim().toLowerCase(),
+    String(r.fecha || "").trim(),
+    String(r.hora || "").trim(),
+    String(r.certificadorUid || r.certificadorEmail || "").trim().toLowerCase(),
+    JSON.stringify(r.paginasCertificadas || [])
+  ].join("|");
+}
+
+function deduplicarHistorialCertificaciones(registros) {
+  const vistos = new Map();
+  for (const registro of registros) {
+    const clave = claveCertificacionHistorial(registro);
+    const anterior = vistos.get(clave);
+    if (!anterior || fechaRegistroEnMs(registro) > fechaRegistroEnMs(anterior)) {
+      vistos.set(clave, registro);
+    }
+  }
+  return Array.from(vistos.values());
+}
+
 async function cargarHistorial() {
   const contenedor = $("historialLista");
   contenedor.innerHTML = '<div class="empty">Cargando historial…</div>';
@@ -2579,15 +2682,8 @@ async function cargarHistorial() {
   try {
     await cargarHistorialEtapasAdmin();
     const snap = await getDocs(collection(db,"certificaciones"));
-    historialRegistros = snap.docs.map(d => ({...d.data(), id:d.id}));
-    // Evita mostrar duplicados idénticos en el historial; conserva recertificaciones
-    // explícitas y certificaciones de páginas distintas.
-    const firmasHistorial = new Set();
-    historialRegistros = historialRegistros.filter(r => {
-      const firma = [r.hashSHA256 || r.hash || r.archivoOriginal || "", (r.paginasCertificadas || []).slice().sort((a,b)=>a-b).join(","), r.esRecertificacion ? (r.id || "recert") : "normal", r.fecha || "", r.hora || ""].join("|").toLowerCase();
-      if (firmasHistorial.has(firma)) return false;
-      firmasHistorial.add(firma); return true;
-    });
+    const todos = snap.docs.map(d => ({...d.data(), id:d.id}));
+    historialRegistros = deduplicarHistorialCertificaciones(todos);
 
     historialRegistros.sort((a,b) => fechaRegistroEnMs(b) - fechaRegistroEnMs(a));
 
@@ -2737,8 +2833,8 @@ function actualizarAccesoAdministrador() {
   // Mesa de Partes: no certifica ni verifica desde el menú (solo firma/remite
   // e historial), pero sí tiene Inicio, Acerca de y Cambio de contraseña,
   // igual que los certificadores.
-  if (navCertificar) navCertificar.classList.toggle("oculto", esMesa || esVB || esAdministradorActual);
-  if (navVerificar) navVerificar.classList.toggle("oculto", esMesa || esVB || esAdministradorActual);
+  if (navCertificar) navCertificar.classList.toggle("oculto", esMesa || esVB);
+  if (navVerificar) navVerificar.classList.toggle("oculto", esMesa || esVB);
   if (navFirmar) navFirmar.classList.toggle("oculto", !esMesa);
   document.querySelector('.nav-btn[data-page="historial"]')?.classList.toggle("oculto", esVB);
   document.querySelector('.nav-btn[data-page="acerca"]')?.classList.remove("oculto");
@@ -2750,8 +2846,8 @@ function actualizarAccesoAdministrador() {
   const cardCertificar = $("cardInicioCertificar");
   const cardVerificar = $("cardInicioVerificar");
   const cardFirmar = $("cardInicioFirmar");
-  if (cardCertificar) cardCertificar.classList.toggle("oculto", esMesa || esVB || esAdministradorActual);
-  if (cardVerificar) cardVerificar.classList.toggle("oculto", esMesa || esVB || esAdministradorActual);
+  if (cardCertificar) cardCertificar.classList.toggle("oculto", esMesa || esVB);
+  if (cardVerificar) cardVerificar.classList.toggle("oculto", esMesa || esVB);
   if (cardFirmar) cardFirmar.classList.toggle("oculto", !esMesa);
   if (cardInicioVistoBueno) cardInicioVistoBueno.classList.toggle("oculto", !esVB);
   const cardHistorial = $("cardInicioHistorial");
@@ -2767,6 +2863,27 @@ function formatoFechaRegistro(r) {
   return `${r.fecha || ""} ${r.hora || ""}`.trim();
 }
 
+function etiquetaEtapaAdmin(coleccion) {
+  return {
+    documentosVB: "Visto Bueno",
+    pendientesFirma: "Procesado por certificador",
+    certificaciones: "Completado"
+  }[coleccion] || coleccion;
+}
+
+function responsableAdmin(r) {
+  return r.coleccion === "documentosVB"
+    ? (r.vbNombre || r.vbEmail || "Raúl")
+    : r.coleccion === "pendientesFirma"
+      ? (r.certificadorNombre || r.certificadorEmail || "Sin certificador")
+      : (r.firmanteNombre || r.firmanteEmail || "Mesa de Partes");
+}
+
+function archivoAdmin(r) {
+  return r.archivoVBNombre || r.archivoProvisionalNombre || r.archivoCertificadoNombre ||
+    r.archivoOriginal || "Documento PDF";
+}
+
 async function cargarAdministracion() {
   if (!esAdministradorActual) return;
   const contenedor = $("adminLista");
@@ -2776,44 +2893,95 @@ async function cargarAdministracion() {
 
   try {
     const colecciones = ["documentosVB","pendientesFirma","certificaciones"];
-    const snaps = await Promise.all(colecciones.map(nombre=>getDocs(collection(db,nombre))));
-    const registros = snaps.flatMap((snap,i)=>snap.docs.map(d=>({...d.data(),id:d.id,coleccion:colecciones[i]})))
-      .sort((a,b) => (b.creadoEn?.seconds || 0) - (a.creadoEn?.seconds || 0));
+    const snaps = await Promise.all(colecciones.map(nombre => getDocs(collection(db,nombre))));
+    const registrosTodos = snaps.flatMap((snap,i) =>
+      snap.docs.map(d => ({...d.data(), id:d.id, coleccion:colecciones[i]}))
+    );
+
+    // En Administración también se evita presentar dos veces una misma
+    // certificación definitiva. Los pendientes y VB conservan cada registro
+    // porque representan etapas diferentes del flujo.
+    const certificados = deduplicarHistorialCertificaciones(
+      registrosTodos.filter(r => r.coleccion === "certificaciones")
+    );
+    const registros = [
+      ...registrosTodos.filter(r => r.coleccion !== "certificaciones"),
+      ...certificados
+    ].sort((a,b) => (b.creadoEn?.seconds || 0) - (a.creadoEn?.seconds || 0));
+
+    const completados = certificados.length;
+    const pendientes = registros.filter(r => r.coleccion !== "certificaciones").length;
 
     if (!registros.length) {
-      contenedor.innerHTML = '<div class="empty">No hay certificaciones registradas.</div>';
+      contenedor.innerHTML = '<div class="empty">No hay registros para administrar.</div>';
       actualizarBotonEliminarAdmin();
       return;
     }
 
+    const grupos = new Map();
+    for (const r of registros) {
+      const grupo = `${r.coleccion}||${responsableAdmin(r)}`;
+      if (!grupos.has(grupo)) grupos.set(grupo, []);
+      grupos.get(grupo).push(r);
+    }
+
+    const gruposHtml = Array.from(grupos.entries()).map(([clave, rows]) => {
+      const primera = rows[0];
+      const etapa = etiquetaEtapaAdmin(primera.coleccion);
+      const usuario = responsableAdmin(primera);
+      return `
+        <div class="admin-user-group">
+          <div class="admin-user-group-head">
+            <div>
+              <strong>${escapeHtml(etapa)}</strong>
+              <span class="admin-group-user">Usuario: ${escapeHtml(usuario)}</span>
+            </div>
+            <span class="admin-group-count">${rows.length} registro(s)</span>
+          </div>
+          <div style="overflow:auto">
+            <table class="admin-table">
+              <thead><tr>
+                <th></th><th>ID</th><th>Archivo</th><th>Fecha</th><th>Estado</th>
+              </tr></thead>
+              <tbody>
+                ${rows.map(r => `
+                  <tr>
+                    <td><input class="admin-check" type="checkbox" value="${escapeHtml(r.coleccion+"|"+r.id)}"></td>
+                    <td><small>${escapeHtml(r.id)}</small></td>
+                    <td>
+                      ${escapeHtml(archivoAdmin(r))}<br>
+                      <span style="color:#64748b">${escapeHtml((r.paginasCertificadas || []).length)} página(s)</span>
+                    </td>
+                    <td>${escapeHtml(formatoFechaRegistro(r))}</td>
+                    <td><span class="admin-stage-badge">${escapeHtml(r.estado || etapa)}</span></td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    }).join("");
+
     contenedor.innerHTML = `
-      <div style="overflow:auto">
-        <table class="admin-table">
-          <thead><tr>
-            <th></th><th>Etapa / ID</th><th>Archivo</th><th>Fecha</th><th>Usuario responsable</th>
-          </tr></thead>
-          <tbody>
-            ${registros.map(r => `
-              <tr>
-                <td><input class="admin-check" type="checkbox" value="${escapeHtml(r.coleccion+"|"+r.id)}"></td>
-                <td><strong>${escapeHtml(({documentosVB:"Visto Bueno",pendientesFirma:"Procesado por certificador",certificaciones:"Firma Mesa de Partes"})[r.coleccion])}</strong><br><small>${escapeHtml(r.id)}</small></td>
-                <td>${escapeHtml(r.archivoOriginal || "Documento PDF")}<br>
-                    <span style="color:#64748b">${escapeHtml((r.paginasCertificadas || []).length)} página(s)</span></td>
-                <td>${escapeHtml(formatoFechaRegistro(r))}</td>
-                <td>${escapeHtml(r.vbNombre || r.vbEmail || r.certificadorNombre || r.certificadorEmail || r.firmanteNombre || r.firmanteEmail || "")}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      </div>`;
+      <div class="admin-completed-summary">
+        <div><strong>Completados</strong><span>${completados}</span><small>certificaciones definitivas</small></div>
+        <div><strong>En proceso</strong><span>${pendientes}</span><small>VB + certificador</small></div>
+      </div>
+      <div class="admin-list-note">
+        Los registros están separados por <strong>etapa y usuario responsable</strong>. Así puede identificar exactamente
+        qué registro corresponde eliminar sin mezclar los documentos de distintos usuarios.
+      </div>
+      ${gruposHtml}`;
+
     contenedor.querySelectorAll(".admin-check").forEach(c =>
       c.addEventListener("change", actualizarBotonEliminarAdmin)
     );
     actualizarBotonEliminarAdmin();
-    estado.textContent = `${registros.length} registro(s)`;
+    estado.textContent = `${registros.length} registro(s) visibles · ${completados} completado(s)`;
   } catch (err) {
     console.error(err);
-    contenedor.innerHTML = `<div class="empty">No se pudo cargar la administración: ${escapeHtml(err.message || "")}</div>`;
+    contenedor.innerHTML =
+      `<div class="empty">No se pudo cargar la administración: ${escapeHtml(err.message || "")}</div>`;
   }
 }
 
@@ -2837,11 +3005,14 @@ async function crearBackupAdmin() {
   estado.textContent = "Generando respaldo…";
 
   try {
-    const snap = await getDocs(collection(db,"certificaciones"));
-    const registros = snap.docs.map(d => ({...d.data(), id:d.id}));
+    const coleccionesBackup = ["documentosVB","pendientesFirma","certificaciones"];
+    const snaps = await Promise.all(coleccionesBackup.map(nombre => getDocs(collection(db,nombre))));
+    const registros = snaps.flatMap((snap,i) =>
+      snap.docs.map(d => ({...d.data(), id:d.id, coleccion:coleccionesBackup[i]}))
+    );
     const backup = {
       sistema: "SAMICERT",
-      version: "2.0.0",
+      version: "2.8.0",
       creadoPor: "Alfredo Raúl Cruzado Palacios",
       tipo: "respaldo_registros_firestore",
       generadoEn: new Date().toISOString(),
@@ -2872,7 +3043,7 @@ async function eliminarSeleccionadosAdmin() {
   if (!ids.length) return;
 
   const confirmado = confirm(
-    `Está a punto de eliminar ${ids.length} registro(s) de certificación.\n\n` +
+    `Está a punto de eliminar ${ids.length} registro(s) seleccionado(s) de la etapa y usuario que aparecen en la bandeja.\n\n` +
     `Esta acción es irreversible desde SAMICERT. ¿Desea continuar?`
   );
   if (!confirmado) return;
@@ -2923,6 +3094,12 @@ function mostrarPagina(nombre) {
   if (nombre === "historial") cargarHistorial();
   if (nombre === "detalleUsuarios") cargarHistorialEtapasAdmin();
   if (nombre === "administracion") cargarAdministracion();
+  if (nombre === "vistoBueno") {
+    cargarSelloVistoBueno().then(() => cargarBandejaVB()).catch(err => {
+      mostrarEstadoVB(err.message || "No se pudo cargar el sello de Visto Bueno.", "error");
+    });
+    cargarBandejaVB();
+  }
   if (nombre === "firmar") {
     $("hashResultadoMesa")?.classList.add("oculto");
     if (temporizadorHashResultadoMesa) { clearTimeout(temporizadorHashResultadoMesa); temporizadorHashResultadoMesa = null; }
