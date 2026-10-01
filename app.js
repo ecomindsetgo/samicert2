@@ -2616,8 +2616,16 @@ async function gestionarRegistroVB(id, accion) {
   if (!confirm(mensaje)) return;
   try {
     const ref = doc(db,"documentosVB",id);
-    if (accion === "eliminar" || accion === "cancelar-eliminar") await deleteDoc(ref);
-    else await setDoc(ref,{estado:"cancelado", canceladoPor:usuarioActual.uid, canceladoNombre:perfilActual?.nombre||usuarioActual.email||"", canceladoEn:serverTimestamp()}, {merge:true});
+    // No borramos físicamente el documento de Firestore. Lo marcamos como
+    // cancelado para conservar la trazabilidad y evitar depender de permisos
+    // de delete en registros antiguos. La bandeja solo muestra pendientes.
+    await setDoc(ref,{
+      estado:"cancelado",
+      canceladoPor:usuarioActual.uid,
+      canceladoNombre:"Raúl Rodríguez Calderón",
+      canceladoEmail:VISTO_BUENO_EMAIL,
+      canceladoEn:serverTimestamp()
+    }, {merge:true});
     await cargarBandejaVB();
     mostrarEstadoVB("Documento cancelado/eliminado; el PDF no fue borrado.");
   } catch(e) { mostrarEstadoVB("No se pudo actualizar el registro: "+(e.message||""),"error"); }
@@ -2632,9 +2640,11 @@ async function cargarBandejaVB() {
     const miEmail = (usuarioActual.email || "").toLowerCase();
     const rows = snap.docs.map(d=>({...d.data(), id:d.id}))
       .filter(r => esUsuarioVistoBueno()
-        ? ((r.vbUid && r.vbUid === usuarioActual.uid) ||
-           ((r.vbEmail || "").toLowerCase() === miEmail) ||
-           (!r.vbUid && !r.vbEmail && ["pendiente-certificador","cancelado"].includes(r.estado)))
+        ? r.estado === "pendiente-certificador" && (
+            (r.vbUid && r.vbUid === usuarioActual.uid) ||
+            ((r.vbEmail || "").toLowerCase() === miEmail) ||
+            (!r.vbUid && !r.vbEmail)
+          )
         : r.estado === "pendiente-certificador")
       .sort((a,b)=>(fechaRegistroEnMs(b) - fechaRegistroEnMs(a)));
 
@@ -3229,7 +3239,7 @@ async function cargarPerfil(user) {
   }
 
   esAdministradorActual = esAdmin;
-  $("usuarioNombre").textContent = perfilActual.nombre || (esAdmin ? "Administrador" : (esMesa ? "Mesa de Partes" : (esVB ? "Visto Bueno" : "Usuario autorizado")));
+  $("usuarioNombre").textContent = esVB ? "Raúl Rodríguez Calderón" : (perfilActual.nombre || (esAdmin ? "Administrador" : (esMesa ? "Mesa de Partes" : "Usuario autorizado")));
   $("usuarioEmail").textContent = perfilActual.correo || user.email || "";
   actualizarAccesoAdministrador();
 }
