@@ -42,6 +42,13 @@ function esUsuarioMesaPartes(user = usuarioActual) {
   return !!user && (user.email || "").toLowerCase() === MESA_PARTES_EMAIL;
 }
 
+const VISTO_BUENO_UID = "nTTcQeP0Z1Q7hh5YTKQyuvpgvS62";
+const VISTO_BUENO_EMAIL = "rrodriguezcal@pj.gob.pe";
+
+function esUsuarioVistoBueno(user = usuarioActual) {
+  return !!user && (user.uid === VISTO_BUENO_UID || (user.email || "").toLowerCase() === VISTO_BUENO_EMAIL);
+}
+
 // Se conserva eliminarPdfPendiente por compatibilidad con registros
 // antiguos que sí llegaron a archivar chunks en pendientesFirma/pdfChunks
 // o certificaciones/pdfChunks en versiones previas de SAMICERT.
@@ -65,6 +72,17 @@ const passwordForm = $("passwordForm");
 const btnGuardarPassword = $("btnGuardarPassword");
 const btnLimpiarPassword = $("btnLimpiarPassword");
 const passwordMessage = $("passwordMessage");
+
+const navVistoBueno = $("navVistoBueno");
+const cardInicioVistoBueno = $("cardInicioVistoBueno");
+const dropVB = $("dropVB");
+const inputPdfVB = $("inputPdfVB");
+const btnAplicarVB = $("btnAplicarVB");
+const btnLimpiarVB = $("btnLimpiarVB");
+const archivoVBSeleccionado = $("archivoVBSeleccionado");
+const vbEstado = $("vbEstado");
+const btnBuscarVB = $("btnBuscarVB");
+const listaArchivosVB = $("listaArchivosVB");
 
 const idConsultaInicial = new URLSearchParams(window.location.search).get("consulta");
 if (idConsultaInicial) {
@@ -96,6 +114,8 @@ let pdfVista = null;
 let usuarioActual = null;
 let perfilActual = null;
 let selloBytes = null;
+let selloVBBytes = null;
+let archivoVBActual = null;
 let procesoFirmaPendiente = null;
 let pdfFirmadoSeleccionado = null;
 let temporizadorHashResultado = null;
@@ -125,6 +145,21 @@ const USUARIOS_AUTORIZADOS = {
     sello: "./sello-roberto.png"
   }
 };
+
+const USUARIOS_VISTO_BUENO = {
+  [VISTO_BUENO_UID]: {
+    nombre: "Raúl",
+    correo: VISTO_BUENO_EMAIL,
+    sello: "./VB RAUL.png"
+  }
+};
+
+function obtenerUsuarioVB(user) {
+  if (!user) return null;
+  if (USUARIOS_VISTO_BUENO[user.uid]) return USUARIOS_VISTO_BUENO[user.uid];
+  const email = (user.email || "").toLowerCase();
+  return Object.values(USUARIOS_VISTO_BUENO).find(u => (u.correo || "").toLowerCase() === email) || null;
+}
 
 function obtenerUsuarioAutorizado(user) {
   if (!user) return null;
@@ -378,7 +413,7 @@ async function cargarSelloAutomatico() {
   selloBytes = null;
   const autorizado = USUARIOS_AUTORIZADOS[usuarioActual?.uid];
 
-  if (usuarioActual?.uid === ADMIN_UID || esUsuarioMesaPartes()) return;
+  if (usuarioActual?.uid === ADMIN_UID || esUsuarioMesaPartes() || esUsuarioVistoBueno()) return;
   if (!autorizado) throw new Error("Usuario no autorizado.");
 
   try {
@@ -789,6 +824,221 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowRight") cambiarPaginaModal(1);
 });
 
+async function cargarSelloVistoBueno() {
+  selloVBBytes = null;
+  if (!esUsuarioVistoBueno()) return;
+  const vb = obtenerUsuarioVB(usuarioActual);
+  if (!vb?.sello) throw new Error("No se ha configurado el sello del usuario de Visto Bueno.");
+  try {
+    const response = await fetch(vb.sello, { cache: "no-store" });
+    if (!response.ok) throw new Error(`No se encontró ${vb.sello}`);
+    const buffer = await response.arrayBuffer();
+    selloVBBytes = new Uint8Array(buffer);
+    if (!selloVBBytes.length) throw new Error("El archivo del sello VB está vacío.");
+  } catch (error) {
+    console.error(error);
+    selloVBBytes = null;
+    throw new Error("No se pudo cargar VB RAUL.png. Verifique que el archivo esté publicado junto a index.html.");
+  }
+}
+
+function nombreConSufijoVB(nombre) {
+  const limpio = String(nombre || "Documento.pdf").replace(/\[VB\](?=\.pdf$)/i, "");
+  if (/\.pdf$/i.test(limpio)) return limpio.slice(0, -4) + "[VB].pdf";
+  return limpio + "[VB].pdf";
+}
+
+function nombreParaCertificacion(nombre) {
+  const base = String(nombre || "Documento.pdf");
+  const sinVB = base.replace(/\[VB\](?=\.pdf$)/i, "");
+  return sinVB.toLowerCase().endsWith(".pdf")
+    ? sinVB.slice(0, -4) + "[SF].pdf"
+    : sinVB + "[SF].pdf";
+}
+
+function mostrarEstadoVB(mensaje, tipo = "ok") {
+  if (!vbEstado) return;
+  vbEstado.classList.remove("oculto");
+  vbEstado.style.borderLeftColor = tipo === "error" ? "#b42318" : "#16823a";
+  vbEstado.style.background = tipo === "error" ? "#fff7f5" : "#f6fbf8";
+  vbEstado.innerHTML = `<div class="hash-titulo" style="color:${tipo === "error" ? "#b42318" : "#16823a"}">${escapeHtml(mensaje)}</div>`;
+}
+
+function limpiarVistoBueno() {
+  archivoVBActual = null;
+  if (inputPdfVB) inputPdfVB.value = "";
+  if (archivoVBSeleccionado) {
+    archivoVBSeleccionado.textContent = "";
+    archivoVBSeleccionado.classList.add("oculto");
+  }
+  if (btnAplicarVB) btnAplicarVB.disabled = true;
+  if (btnLimpiarVB) btnLimpiarVB.disabled = true;
+  if (vbEstado) {
+    vbEstado.classList.add("oculto");
+    vbEstado.innerHTML = "";
+  }
+}
+
+function seleccionarPdfParaVB(file) {
+  if (!file || (!/application\/pdf/i.test(file.type) && !/\.pdf$/i.test(file.name || ""))) {
+    alert("Selecciona un archivo PDF válido.");
+    return;
+  }
+  archivoVBActual = file;
+  if (archivoVBSeleccionado) {
+    archivoVBSeleccionado.innerHTML = `<strong>PDF seleccionado:</strong> ${escapeHtml(file.name)}<br><span>El sello VB se colocará en todas las páginas.</span>`;
+    archivoVBSeleccionado.classList.remove("oculto");
+  }
+  if (btnAplicarVB) btnAplicarVB.disabled = !selloVBBytes;
+  if (btnLimpiarVB) btnLimpiarVB.disabled = false;
+  if (vbEstado) vbEstado.classList.add("oculto");
+}
+
+async function aplicarVistoBuenoAUnPdf(file) {
+  if (!selloVBBytes?.length) throw new Error("El sello de Visto Bueno no está disponible.");
+  const { PDFDocument } = PDFLib;
+  let pdfDoc;
+  try {
+    pdfDoc = await PDFDocument.load(await file.arrayBuffer());
+  } catch (errorCarga) {
+    console.error(errorCarga);
+    const mensaje = String(errorCarga?.message || "");
+    if (/encrypt/i.test(mensaje)) throw new Error("El PDF está protegido/encriptado. Quite la contraseña o la protección antes de colocar el Visto Bueno.");
+    throw new Error("El archivo no es un PDF válido o está dañado.");
+  }
+
+  let sello;
+  try {
+    sello = await pdfDoc.embedPng(selloVBBytes);
+  } catch (e) {
+    console.error(e);
+    throw new Error("No se pudo incrustar VB RAUL.png.");
+  }
+
+  const paginas = pdfDoc.getPages();
+  if (!paginas.length) throw new Error("El PDF no contiene páginas.");
+
+  const tamanoVB = 82;
+  const margenVB = 24;
+  const esquinaVB = "superior-derecha";
+
+  paginas.forEach(pagina => {
+    const rotacion = normalizarRotacionPagina(pagina);
+    const posicion = calcularPosicionSello(pagina, esquinaVB, tamanoVB, margenVB, rotacion);
+    pagina.drawImage(sello, {
+      x: posicion.x,
+      y: posicion.y,
+      width: tamanoVB,
+      height: tamanoVB,
+      rotate: PDFLib.degrees(posicion.giro)
+    });
+  });
+
+  pdfDoc.setTitle(`SAMICERT VB - ${file.name}`);
+  pdfDoc.setSubject("SAMICERT - Documento con Visto Bueno");
+  pdfDoc.setKeywords(["SAMICERT", "VISTO BUENO", "VB", VISTO_BUENO_EMAIL]);
+
+  return new Uint8Array(await pdfDoc.save());
+}
+
+async function guardarDocumentoVB() {
+  if (!esUsuarioVistoBueno() || !archivoVBActual) return;
+  btnAplicarVB.disabled = true;
+  mostrarEstadoVB("Procesando el PDF y colocando el sello VB…");
+  try {
+    const bytes = await aplicarVistoBuenoAUnPdf(archivoVBActual);
+    const nombreSalidaVB = nombreConSufijoVB(archivoVBActual.name);
+    let handleDestino = null;
+
+    if ("showSaveFilePicker" in window) {
+      try {
+        handleDestino = await window.showSaveFilePicker({
+          suggestedName: nombreSalidaVB,
+          types: [{ description: "Documento PDF", accept: { "application/pdf": [".pdf"] } }]
+        });
+      } catch (err) {
+        if (err.name === "AbortError") throw new Error("Se canceló la ubicación de guardado. El documento con VB no fue generado.");
+        throw err;
+      }
+    }
+
+    const resultado = await guardarResultado(bytes, nombreSalidaVB, handleDestino, null);
+    mostrarEstadoVB(`✓ Visto Bueno aplicado correctamente. Archivo guardado como ${resultado.nombre || nombreSalidaVB}.`);
+    limpiarVistoBueno();
+    mostrarEstadoVB(`✓ Visto Bueno aplicado correctamente. Archivo guardado como ${resultado.nombre || nombreSalidaVB}.`);
+  } catch (err) {
+    console.error(err);
+    mostrarEstadoVB("No se pudo generar el documento con Visto Bueno. " + (err.message || ""), "error");
+    if (btnAplicarVB) btnAplicarVB.disabled = false;
+  }
+}
+
+async function buscarArchivosVBEnCarpeta() {
+  if (!usuarioActual || esUsuarioVistoBueno() || !btnBuscarVB) return;
+  if (!("showDirectoryPicker" in window)) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/pdf,.pdf";
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file) seleccionarPdf(file);
+    });
+    input.click();
+    return;
+  }
+
+  try {
+    const dirHandle = await window.showDirectoryPicker({ mode: "read" });
+    const archivos = [];
+    for await (const entry of dirHandle.values()) {
+      if (entry.kind !== "file" || !/\[VB\]\.pdf$/i.test(entry.name)) continue;
+      const file = await entry.getFile();
+      archivos.push({ entry, file });
+    }
+    archivos.sort((a,b) => a.file.name.localeCompare(b.file.name, "es", {numeric:true}));
+
+    if (!listaArchivosVB) return;
+    listaArchivosVB.classList.remove("oculto");
+    if (!archivos.length) {
+      listaArchivosVB.innerHTML = '<div class="empty">No se encontraron archivos con terminación [VB].pdf en la carpeta seleccionada.</div>';
+      return;
+    }
+
+    listaArchivosVB.innerHTML = archivos.map((item, i) => `
+      <div class="vb-archivo-item">
+        <div style="min-width:0">
+          <div class="vb-nombre">${escapeHtml(item.file.name)}</div>
+          <div class="vb-meta">${item.file.size.toLocaleString()} bytes · archivo con Visto Bueno</div>
+        </div>
+        <button type="button" class="btn-small btn-cargar-vb" data-index="${i}">Cargar</button>
+      </div>`).join("");
+
+    listaArchivosVB.querySelectorAll(".btn-cargar-vb").forEach(btn => {
+      btn.addEventListener("click", () => seleccionarPdf(archivos[Number(btn.dataset.index)].file));
+    });
+  } catch (err) {
+    if (err?.name === "AbortError") return;
+    console.error(err);
+    if (listaArchivosVB) {
+      listaArchivosVB.classList.remove("oculto");
+      listaArchivosVB.innerHTML = `<div class="empty">No se pudo abrir la carpeta: ${escapeHtml(err.message || "")}</div>`;
+    }
+  }
+}
+
+dropVB?.addEventListener("click", () => inputPdfVB?.click());
+inputPdfVB?.addEventListener("change", () => seleccionarPdfParaVB(inputPdfVB.files?.[0] || null));
+dropVB?.addEventListener("dragover", e => { e.preventDefault(); dropVB.classList.add("dragover"); });
+dropVB?.addEventListener("dragleave", () => dropVB.classList.remove("dragover"));
+dropVB?.addEventListener("drop", e => {
+  e.preventDefault();
+  dropVB.classList.remove("dragover");
+  seleccionarPdfParaVB(Array.from(e.dataTransfer.files || [])[0] || null);
+});
+btnAplicarVB?.addEventListener("click", guardarDocumentoVB);
+btnLimpiarVB?.addEventListener("click", limpiarVistoBueno);
+btnBuscarVB?.addEventListener("click", buscarArchivosVBEnCarpeta);
+
 function resetearEstadoSesion() {
   cerrarVistaAmpliada();
   if (resultadoBlob) {
@@ -802,6 +1052,14 @@ function resetearEstadoSesion() {
   totalPaginas = 0;
   pdfVista = null;
   selloBytes = null;
+  selloVBBytes = null;
+  archivoVBActual = null;
+  if (inputPdfVB) inputPdfVB.value = "";
+  if (archivoVBSeleccionado) { archivoVBSeleccionado.textContent = ""; archivoVBSeleccionado.classList.add("oculto"); }
+  if (btnAplicarVB) btnAplicarVB.disabled = true;
+  if (btnLimpiarVB) btnLimpiarVB.disabled = true;
+  if (vbEstado) { vbEstado.classList.add("oculto"); vbEstado.innerHTML = ""; }
+  if (listaArchivosVB) { listaArchivosVB.classList.add("oculto"); listaArchivosVB.innerHTML = ""; }
   perfilActual = null;
   esAdministradorActual = false;
   actualizarAccesoAdministrador();
@@ -837,7 +1095,7 @@ function resetearEstadoSesion() {
 }
 
 async function seleccionarPdf(file) {
-  if (!file || file.type !== "application/pdf") {
+  if (!file || (!/application\/pdf/i.test(file.type) && !/\.pdf$/i.test(file.name || ""))) {
     alert("Selecciona un archivo PDF válido.");
     return;
   }
@@ -1582,12 +1840,10 @@ function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, fireba
 
 btnAplicar.addEventListener("click", async () => {
   ocultarHash();
-  if (!archivoSeleccionado || !usuarioActual || esUsuarioMesaPartes()) return;
+  if (!archivoSeleccionado || !usuarioActual || esUsuarioMesaPartes() || esUsuarioVistoBueno()) return;
 
   btnAplicar.disabled = true;
-  const nombreProvisional = archivoSeleccionado.name.toLowerCase().endsWith(".pdf")
-    ? archivoSeleccionado.name.slice(0, -4) + "[SF].pdf"
-    : archivoSeleccionado.name + "[SF].pdf";
+  const nombreProvisional = nombreParaCertificacion(archivoSeleccionado.name);
 
   let datosRecert = { continuar: true, motivo: "" };
   try {
@@ -2334,9 +2590,11 @@ $("btnHistPaginaSiguiente").addEventListener("click", () => {
 function actualizarAccesoAdministrador() {
   esAdministradorActual = !!usuarioActual && usuarioActual.uid === ADMIN_UID;
   const esMesa = esUsuarioMesaPartes();
+  const esVB = esUsuarioVistoBueno();
 
   const navAdmin = $("navAdministracion");
   if (navAdmin) navAdmin.classList.toggle("oculto", !esAdministradorActual);
+  if (navVistoBueno) navVistoBueno.classList.toggle("oculto", !esVB);
 
   const navCertificar = document.querySelector('.nav-btn[data-page="certificar"]');
   const navFirmar = $("navFirmar");
@@ -2345,9 +2603,11 @@ function actualizarAccesoAdministrador() {
   // Mesa de Partes: no certifica ni verifica desde el menú (solo firma/remite
   // e historial), pero sí tiene Inicio, Acerca de y Cambio de contraseña,
   // igual que los certificadores.
-  if (navCertificar) navCertificar.classList.toggle("oculto", esMesa);
-  if (navVerificar) navVerificar.classList.toggle("oculto", esMesa);
+  if (navCertificar) navCertificar.classList.toggle("oculto", esMesa || esVB);
+  if (navVerificar) navVerificar.classList.toggle("oculto", esMesa || esVB);
   if (navFirmar) navFirmar.classList.toggle("oculto", !esMesa);
+  document.querySelector('.nav-btn[data-page="historial"]')?.classList.toggle("oculto", esVB);
+  document.querySelector('.nav-btn[data-page="acerca"]')?.classList.remove("oculto");
   if (btnCambiarPassword) btnCambiarPassword.classList.remove("oculto");
 
   // Accesos directos de la página de Inicio: para Mesa de Partes solo se
@@ -2356,9 +2616,12 @@ function actualizarAccesoAdministrador() {
   const cardCertificar = $("cardInicioCertificar");
   const cardVerificar = $("cardInicioVerificar");
   const cardFirmar = $("cardInicioFirmar");
-  if (cardCertificar) cardCertificar.classList.toggle("oculto", esMesa);
-  if (cardVerificar) cardVerificar.classList.toggle("oculto", esMesa);
+  if (cardCertificar) cardCertificar.classList.toggle("oculto", esMesa || esVB);
+  if (cardVerificar) cardVerificar.classList.toggle("oculto", esMesa || esVB);
   if (cardFirmar) cardFirmar.classList.toggle("oculto", !esMesa);
+  if (cardInicioVistoBueno) cardInicioVistoBueno.classList.toggle("oculto", !esVB);
+  const cardHistorial = $("cardInicioHistorial");
+  if (cardHistorial) cardHistorial.classList.toggle("oculto", esVB);
 }
 
 function formatoFechaRegistro(r) {
@@ -2536,8 +2799,49 @@ function mostrarPagina(nombre) {
   window.scrollTo({top:0,behavior:"smooth"});
 }
 
+
+// Menú lateral móvil estilo SAAMIR
+const btnMenuMovil = $("btnMenuMovil");
+const sidebarMovil = document.querySelector(".sidebar");
+const sidebarBackdrop = $("sidebarBackdrop");
+
+function cerrarMenuMovil(){
+  if (!sidebarMovil) return;
+  sidebarMovil.classList.remove("menu-abierto");
+  sidebarBackdrop?.classList.remove("show");
+  btnMenuMovil?.classList.remove("is-open");
+  btnMenuMovil?.setAttribute("aria-expanded","false");
+  sidebarBackdrop?.setAttribute("aria-hidden","true");
+  document.body.classList.remove("menu-movil-abierto");
+}
+
+function abrirMenuMovil(){
+  if (!sidebarMovil) return;
+  sidebarMovil.classList.add("menu-abierto");
+  sidebarBackdrop?.classList.add("show");
+  btnMenuMovil?.classList.add("is-open");
+  btnMenuMovil?.setAttribute("aria-expanded","true");
+  sidebarBackdrop?.setAttribute("aria-hidden","false");
+  document.body.classList.add("menu-movil-abierto");
+}
+
+function toggleMenuMovil(){
+  if (sidebarMovil?.classList.contains("menu-abierto")) cerrarMenuMovil();
+  else abrirMenuMovil();
+}
+
+btnMenuMovil?.addEventListener("click", toggleMenuMovil);
+sidebarBackdrop?.addEventListener("click", cerrarMenuMovil);
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") cerrarMenuMovil();
+});
+
 document.querySelectorAll(".nav-btn").forEach(btn => {
-  btn.addEventListener("click", () => mostrarPagina(btn.dataset.page));
+  btn.addEventListener("click", () => {
+    mostrarPagina(btn.dataset.page);
+    if (window.matchMedia("(max-width: 800px)").matches) cerrarMenuMovil();
+  });
 });
 
 document.querySelectorAll("[data-go]").forEach(btn => {
@@ -2553,16 +2857,21 @@ $("btnDeseleccionarTodosAdmin").addEventListener("click", () => seleccionarTodos
 
 async function cargarPerfil(user) {
   const autorizado = obtenerUsuarioAutorizado(user);
+  const vistoBueno = obtenerUsuarioVB(user);
   const esAdmin = user.uid === ADMIN_UID;
 
   const esMesa = esUsuarioMesaPartes(user);
+  const esVB = esUsuarioVistoBueno(user);
 
-  if (!autorizado && !esAdmin && !esMesa) {
+  if (!autorizado && !vistoBueno && !esAdmin && !esMesa) {
     throw new Error("Esta cuenta no está autorizada para utilizar SAMICERT.");
   }
 
   if (autorizado && user.email?.toLowerCase() !== autorizado.correo.toLowerCase()) {
     throw new Error("La cuenta no coincide con el certificador autorizado.");
+  }
+  if (vistoBueno && user.email?.toLowerCase() !== vistoBueno.correo.toLowerCase()) {
+    throw new Error("La cuenta no coincide con el usuario autorizado para Visto Bueno.");
   }
 
   const snap = await getDoc(doc(db,"usuarios",user.uid));
@@ -2570,9 +2879,9 @@ async function cargarPerfil(user) {
   if (!snap.exists()) {
     const perfilNuevo = {
       uid:user.uid,
-      nombre:autorizado?.nombre || user.displayName || (esAdmin ? "Administrador" : (esMesa ? "Mesa de Partes" : "Usuario autorizado")),
-      correo:autorizado?.correo || user.email || "",
-      rol:esAdmin ? "administrador" : (esMesa ? "mesa_partes" : "certificador"),
+      nombre:autorizado?.nombre || vistoBueno?.nombre || user.displayName || (esAdmin ? "Administrador" : (esMesa ? "Mesa de Partes" : "Usuario autorizado")),
+      correo:autorizado?.correo || vistoBueno?.correo || user.email || "",
+      rol:esAdmin ? "administrador" : (esMesa ? "mesa_partes" : (esVB ? "visto_bueno" : "certificador")),
       creadoEn:serverTimestamp()
     };
     await setDoc(doc(db,"usuarios",user.uid), perfilNuevo);
@@ -2581,7 +2890,7 @@ async function cargarPerfil(user) {
     perfilActual = {
       ...snap.data(),
       uid:user.uid,
-      rol:esAdmin ? "administrador" : (esMesa ? "mesa_partes" : (snap.data().rol || "certificador"))
+      rol:esAdmin ? "administrador" : (esMesa ? "mesa_partes" : (esVB ? "visto_bueno" : (snap.data().rol || "certificador")))
     };
 
     // Autocorrección: cuentas antiguas de Mesa de Partes que quedaron
@@ -2598,7 +2907,7 @@ async function cargarPerfil(user) {
   }
 
   esAdministradorActual = esAdmin;
-  $("usuarioNombre").textContent = perfilActual.nombre || (esAdmin ? "Administrador" : (esMesa ? "Mesa de Partes" : "Usuario autorizado"));
+  $("usuarioNombre").textContent = perfilActual.nombre || (esAdmin ? "Administrador" : (esMesa ? "Mesa de Partes" : (esVB ? "Visto Bueno" : "Usuario autorizado")));
   $("usuarioEmail").textContent = perfilActual.correo || user.email || "";
   actualizarAccesoAdministrador();
 }
@@ -2733,6 +3042,7 @@ onAuthStateChanged(auth,async user => {
   try {
     await cargarPerfil(user);
     await cargarSelloAutomatico();
+    await cargarSelloVistoBueno();
 
     loginScreen.classList.add("oculto");
     appScreen.classList.remove("oculto");
@@ -2744,6 +3054,8 @@ onAuthStateChanged(auth,async user => {
       inputId.value = idConsultaEnUrl.trim().toUpperCase();
       $("btnConsultar").click();
       window.history.replaceState({}, "", window.location.pathname);
+    } else if (esUsuarioVistoBueno()) {
+      mostrarPagina("vistoBueno");
     } else if (esUsuarioMesaPartes()) {
       mostrarPagina("firmar");
       await cargarPendientesFirma();

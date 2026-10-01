@@ -23,20 +23,29 @@ service cloud.firestore {
         request.auth.token.email == "archivocsjsanta@pj.gob.pe";
     }
 
+    function esVistoBueno() {
+      return request.auth != null &&
+        (request.auth.uid == "nTTcQeP0Z1Q7hh5YTKQyuvpgvS62" ||
+         request.auth.token.email == "rrodriguezcal@pj.gob.pe");
+    }
+
     match /usuarios/{uid} {
       allow read: if esAdministrador() ||
         (esCertificador() && request.auth.uid == uid) ||
-        (esMesaPartes() && request.auth.uid == uid);
+        (esMesaPartes() && request.auth.uid == uid) ||
+        (esVistoBueno() && request.auth.uid == uid);
 
       allow create: if
         (esAdministrador() && request.auth.uid == uid) ||
         (esCertificador() && request.auth.uid == uid) ||
-        (esMesaPartes() && request.auth.uid == uid);
+        (esMesaPartes() && request.auth.uid == uid) ||
+        (esVistoBueno() && request.auth.uid == uid);
 
       allow update: if
         (esAdministrador() && request.auth.uid == uid) ||
         (esCertificador() && request.auth.uid == uid) ||
-        (esMesaPartes() && request.auth.uid == uid);
+        (esMesaPartes() && request.auth.uid == uid) ||
+        (esVistoBueno() && request.auth.uid == uid);
 
       allow delete: if false;
     }

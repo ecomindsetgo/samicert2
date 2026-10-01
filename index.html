@@ -65,6 +65,7 @@
 
     <nav class="nav">
       <button class="nav-btn active" data-page="inicio"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9a1 1 0 0 0 1 1H9a1 1 0 0 0 1-1v-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 0 1 1h2.5a1 1 0 0 0 1-1v-9"/></svg></span>Inicio</button>
+      <button class="nav-btn oculto" id="navVistoBueno" data-page="vistoBueno"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m8 12.2 2.5 2.5L16.5 9"/></svg></span>Visto Bueno</button>
       <button class="nav-btn" data-page="certificar"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h6l4 4v13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="m9.5 14.5 2 2 4-4.5"/></svg></span>Certificar Documento</button>
       <button class="nav-btn" data-page="verificar"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 5 6v5.2c0 4.6 3 7.9 7 9.3 4-1.4 7-4.7 7-9.3V6l-7-2.5Z"/><path d="m9 12 2 2 4-4.5"/></svg></span>Verificar Documento</button>
       <button class="nav-btn oculto" id="navFirmar" data-page="firmar"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="m7 16 9-9 3 3-9 9H7v-3Z"/><path d="M14 7 16 5l3 3-2 2"/></svg></span>Firmar y remitir</button>
@@ -75,14 +76,20 @@
     </nav>
 
     <div class="sidebar-footer">
-      SAMICERT v2.2.0<br>
+      SAMICERT v2.3.0<br>
       Creado por Alfredo Raúl Cruzado Palacios<br>
       © 2026 Poder Judicial del Perú
     </div>
   </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
 
   <main class="main">
     <header class="topbar">
+      <div class="mobile-topbar-left">
+        <button class="mobile-menu-btn" id="btnMenuMovil" type="button" aria-label="Abrir menú" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
       <div class="top-title">
         <div class="long">Sistema de Archivo y Manejo de Información para la Certificación de Documentos</div>
         <div class="sam">SAMICERT</div>
@@ -109,6 +116,15 @@
           <p>Seleccione una opción del menú para comenzar.</p>
           <div class="info-strip">
             <strong>Certificación automática:</strong> el sello se asigna automáticamente según el usuario que inició sesión. El sistema no permite cambiarlo desde la pantalla.
+          </div>
+        </div>
+
+        <div class="home-card card-vb oculto" id="cardInicioVistoBueno" style="margin-bottom:18px">
+          <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="m8 12.2 2.5 2.5L16.5 9"/></svg></div>
+          <div>
+            <h3>Visto Bueno de copias</h3>
+            <p>Raúl puede cargar el PDF, colocar automáticamente su sello VB en la parte superior derecha de cada página y guardarlo en la carpeta compartida con el sufijo <strong>[VB]</strong>.</p>
+            <button class="btn-card" data-go="vistoBueno">Ir a Visto Bueno</button>
           </div>
         </div>
 
@@ -165,6 +181,43 @@
       </section>
 
       
+      <section class="page" id="page-vistoBueno">
+        <div class="section-head">
+          <h2>Visto Bueno de copias</h2>
+          <p>Módulo exclusivo para el usuario autorizado de Visto Bueno. El PDF original no se modifica; SAMICERT genera una copia con el sello VB y la guarda con el sufijo <strong>[VB]</strong>.</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">1. Cargar documento</div>
+          <div class="panel-subtitle">Seleccione el PDF de copias. El visto bueno se colocará automáticamente en la parte superior derecha de cada página, con margen suficiente para no cubrir los folios ubicados en la parte inferior.</div>
+          <div class="drop" id="dropVB">
+            <div class="icono"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8L14.5 3Z"/><path d="M14.5 3v4.5A1.5 1.5 0 0 0 16 9h4.5"/><path d="M9 13h6M9 16.5h6M9 9.5h2"/></svg></div>
+            <div class="txt1">Haz clic para seleccionar el PDF de copias</div>
+            <div class="txt2">También puede arrastrar y soltar el archivo aquí</div>
+            <input type="file" id="inputPdfVB" accept="application/pdf,.pdf" class="input-oculto" aria-hidden="true">
+          </div>
+          <div id="archivoVBSeleccionado" class="vb-archivo oculto"></div>
+        </div>
+
+        <div class="panel" id="panelVBPrevisualizacion">
+          <div class="panel-title">2. Vista previa y sello</div>
+          <div class="panel-subtitle">El sello <strong>VB RAUL.png</strong> se aplicará a todas las páginas del PDF. Posición: superior derecha, con separación del borde.</div>
+          <div class="vb-sello-preview"><img src="./VB RAUL.png" alt="Sello Visto Bueno Raúl"><div><strong>Visto Bueno automático</strong><br><span>El operador no puede mover ni cambiar el sello desde SAMICERT.</span></div></div>
+          <div id="vbEstado" class="hash-resultado oculto"></div>
+          <div class="actions">
+            <button type="button" class="btn-green" id="btnAplicarVB" disabled>Colocar VB y guardar</button>
+            <button type="button" class="btn-gray" id="btnLimpiarVB" disabled>Quitar documento</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Flujo posterior</div>
+          <div class="vb-flujo">
+            <span>1. Raúl carga</span><b>→</b><span>2. Coloca VB</span><b>→</b><span>3. Guarda <strong>[VB].pdf</strong></span><b>→</b><span>4. Certificador carga el [VB]</span><b>→</b><span>5. Certificación normal</span>
+          </div>
+        </div>
+      </section>
+
       <section class="page" id="page-certificar">
         <div class="section-head">
           <h2>Certificar Documento</h2>
@@ -185,6 +238,15 @@
         <div class="panel">
           <div class="panel-title">Documento PDF</div>
           <div class="panel-subtitle">El sello correspondiente al usuario que inició sesión se aplica automáticamente.</div>
+
+          <div class="vb-import-panel">
+            <div>
+              <strong>Documento con Visto Bueno</strong>
+              <span>Si el PDF ya fue preparado por Raúl, puede buscarlo directamente en la carpeta compartida.</span>
+            </div>
+            <button type="button" class="btn-small" id="btnBuscarVB">Buscar archivos [VB]</button>
+          </div>
+          <div id="listaArchivosVB" class="vb-archivos-lista oculto"></div>
 
           <div class="drop" id="drop">
             <div class="icono"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8L14.5 3Z"/><path d="M14.5 3v4.5A1.5 1.5 0 0 0 16 9h4.5"/><path d="M9 13h6M9 16.5h6M9 9.5h2"/></svg></div>
