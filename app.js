@@ -2580,6 +2580,14 @@ async function cargarHistorial() {
     await cargarHistorialEtapasAdmin();
     const snap = await getDocs(collection(db,"certificaciones"));
     historialRegistros = snap.docs.map(d => ({...d.data(), id:d.id}));
+    // Evita mostrar duplicados idénticos en el historial; conserva recertificaciones
+    // explícitas y certificaciones de páginas distintas.
+    const firmasHistorial = new Set();
+    historialRegistros = historialRegistros.filter(r => {
+      const firma = [r.hashSHA256 || r.hash || r.archivoOriginal || "", (r.paginasCertificadas || []).slice().sort((a,b)=>a-b).join(","), r.esRecertificacion ? (r.id || "recert") : "normal", r.fecha || "", r.hora || ""].join("|").toLowerCase();
+      if (firmasHistorial.has(firma)) return false;
+      firmasHistorial.add(firma); return true;
+    });
 
     historialRegistros.sort((a,b) => fechaRegistroEnMs(b) - fechaRegistroEnMs(a));
 
@@ -2729,8 +2737,8 @@ function actualizarAccesoAdministrador() {
   // Mesa de Partes: no certifica ni verifica desde el menú (solo firma/remite
   // e historial), pero sí tiene Inicio, Acerca de y Cambio de contraseña,
   // igual que los certificadores.
-  if (navCertificar) navCertificar.classList.toggle("oculto", esMesa || esVB);
-  if (navVerificar) navVerificar.classList.toggle("oculto", esMesa || esVB);
+  if (navCertificar) navCertificar.classList.toggle("oculto", esMesa || esVB || esAdministradorActual);
+  if (navVerificar) navVerificar.classList.toggle("oculto", esMesa || esVB || esAdministradorActual);
   if (navFirmar) navFirmar.classList.toggle("oculto", !esMesa);
   document.querySelector('.nav-btn[data-page="historial"]')?.classList.toggle("oculto", esVB);
   document.querySelector('.nav-btn[data-page="acerca"]')?.classList.remove("oculto");
@@ -2742,8 +2750,8 @@ function actualizarAccesoAdministrador() {
   const cardCertificar = $("cardInicioCertificar");
   const cardVerificar = $("cardInicioVerificar");
   const cardFirmar = $("cardInicioFirmar");
-  if (cardCertificar) cardCertificar.classList.toggle("oculto", esMesa || esVB);
-  if (cardVerificar) cardVerificar.classList.toggle("oculto", esMesa || esVB);
+  if (cardCertificar) cardCertificar.classList.toggle("oculto", esMesa || esVB || esAdministradorActual);
+  if (cardVerificar) cardVerificar.classList.toggle("oculto", esMesa || esVB || esAdministradorActual);
   if (cardFirmar) cardFirmar.classList.toggle("oculto", !esMesa);
   if (cardInicioVistoBueno) cardInicioVistoBueno.classList.toggle("oculto", !esVB);
   const cardHistorial = $("cardInicioHistorial");
