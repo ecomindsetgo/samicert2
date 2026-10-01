@@ -2525,36 +2525,22 @@ function fechaRegistroEnMs(r) {
 }
 
 async function cargarHistorialEtapasAdmin() {
-  const cont = $("historialEtapasAdmin"); if (!cont || usuarioActual?.uid !== ADMIN_UID) return;
+  if (usuarioActual?.uid !== ADMIN_UID) return;
+  const detalle = document.querySelector("#page-detalleUsuarios.active #historialDetalleUsuarios");
+  const cont = detalle || $("historialEtapasAdmin"); if (!cont) return;
   try {
     const [vbSnap, pendSnap, certSnap] = await Promise.all([getDocs(collection(db,"documentosVB")),getDocs(collection(db,"pendientesFirma")),getDocs(collection(db,"certificaciones"))]);
-    const vb = vbSnap.docs.map(d=>({...d.data(),id:d.id}));
-    const pend = pendSnap.docs.map(d=>({...d.data(),id:d.id}));
-    const cert = certSnap.docs.map(d=>({...d.data(),id:d.id}));
-    const etapa = $("filtroEtapaAdmin")?.value || "registradas";
-    const esc = v => escapeHtml(v ?? "");
-    const item = (titulo, meta, estado) => `<div class="history-item"><div class="history-id">${esc(titulo)}</div><div class="history-meta">${meta}</div><div class="history-meta"><strong>Estado:</strong> ${esc(estado || "Registrado")}</div></div>`;
-    const render = (arr, fn) => arr.length ? `<div class="admin-etapas-lista">${arr.map(fn).join("")}</div>` : '<div class="empty">No hay documentos en esta etapa.</div>';
-    let titulo="", cuerpo="";
-    if (etapa === "vb") {
-      titulo = `Documentos con Visto Bueno (${vb.length})`;
-      cuerpo = render(vb, r=>item(r.archivoVBNombre||r.archivoOriginal||r.id, `Responsable VB: ${esc(r.vbNombre||r.vbEmail||"Raúl")} · ${esc(r.fecha||"")} ${esc(r.hora||"")}`, r.estado||"Con VB"));
-    } else if (etapa === "procesados") {
-      titulo = `Documentos procesados por certificador (${pend.length})`;
-      cuerpo = render(pend, r=>item(r.archivoProvisionalNombre||r.archivoOriginal||r.id, `Certificador: ${esc(r.certificadorNombre||r.certificadorEmail||"No indicado")} · ${esc(r.fecha||"")} ${esc(r.hora||"")}`, r.estado||"Procesado por certificador"));
-    } else if (etapa === "mesa") {
-      titulo = `Documentos con firma de Mesa de Partes (${cert.length})`;
-      cuerpo = render(cert, r=>item(r.archivoCertificadoNombre||r.archivoOriginal||r.id, `Certificador: ${esc(r.certificadorNombre||r.certificadorEmail||"No indicado")} · Mesa de Partes: ${esc(r.firmanteEmail||r.firmanteNombre||"No indicado")} · ${esc(r.fecha||"")} ${esc(r.hora||"")}`, "Firmado por Mesa de Partes"));
-    } else {
-      titulo = `Certificaciones registradas (${cert.length})`;
-      cuerpo = render(cert, r=>item(r.archivoCertificadoNombre||r.archivoOriginal||r.id, `Certificador: ${esc(r.certificadorNombre||r.certificadorEmail||"No indicado")} · Mesa de Partes: ${esc(r.firmanteEmail||r.firmanteNombre||"No indicado")} · ${esc(r.fecha||"")} ${esc(r.hora||"")}`, "Certificación registrada"));
-    }
-    cont.innerHTML = `<div class="panel"><div class="history-toolbar"><div class="panel-title" style="margin:0">${titulo}</div><span class="history-meta">Listado de reportes</span></div>${cuerpo}</div>`;
-  } catch(e) { cont.innerHTML = `<div class="empty">No se pudo cargar el historial por etapas: ${escapeHtml(e.message||"")}</div>`; }
+    if (!detalle) { cont.innerHTML = `<div class="panel"><div class="panel-title">Certificaciones registradas</div><div class="history-meta">Total de certificaciones culminadas: <strong>${certSnap.size}</strong></div></div>`; return; }
+    const etapa = $("filtroDetalleEtapa")?.value || "vb";
+    const sets = {vb:{title:"Documentos con Visto Bueno",rows:vbSnap.docs.map(d=>({...d.data(),id:d.id})),user:r=>r.vbNombre||r.vbEmail||"Raúl",file:r=>r.archivoVBNombre||r.archivoOriginal||r.id},procesados:{title:"Documentos procesados por certificador",rows:pendSnap.docs.map(d=>({...d.data(),id:d.id})),user:r=>r.certificadorNombre||r.certificadorEmail||"No indicado",file:r=>r.archivoProvisionalNombre||r.archivoOriginal||r.id},mesa:{title:"Documentos con firma de Mesa de Partes",rows:certSnap.docs.map(d=>({...d.data(),id:d.id})),user:r=>r.firmanteNombre||r.firmanteEmail||"Mesa de Partes",file:r=>r.archivoCertificadoNombre||r.archivoOriginal||r.id}};
+    const data=sets[etapa]; const esc=v=>escapeHtml(v??"");
+    cont.innerHTML=`<div class="panel"><div class="panel-title">${data.title} (${data.rows.length})</div>${data.rows.length?data.rows.map(r=>`<div class="history-item"><div class="history-id">${esc(data.file(r))}</div><div class="history-meta">Usuario: ${esc(data.user(r))} · Fecha: ${esc(r.fecha||"")} ${esc(r.hora||"")}</div><div class="history-meta">Estado: ${esc(r.estado||data.title)}</div></div>`).join(""):'<div class="empty">No hay documentos registrados en esta etapa.</div>'}</div>`;
+  } catch(e) { cont.innerHTML=`<div class="empty">No se pudo cargar el detalle: ${escapeHtml(e.message||"")}</div>`; }
 }
 
 async function gestionarRegistroVB(id, accion) {
   if (!esUsuarioVistoBueno()) return;
+  if (!esUsuarioVistoBueno() || !usuarioActual) { mostrarEstadoVB("Solo el usuario de Visto Bueno puede realizar esta acción.","error"); return; }
   const mensaje = accion === "eliminar" ? "¿Eliminar el registro de VB? Esta acción no elimina el PDF guardado." : "¿Cancelar este Visto Bueno? El documento dejará de aparecer como pendiente para el certificador.";
   if (!confirm(mensaje)) return;
   try {
@@ -2572,13 +2558,11 @@ async function cargarBandejaVB() {
   try {
     const snap = await getDocs(collection(db, "documentosVB"));
     const rows = snap.docs.map(d=>({...d.data(), id:d.id})).filter(r=>r.estado === "pendiente-certificador").sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
-    el.innerHTML = rows.length ? rows.map(r=>`<div class="firma-pendiente-item vb-pendiente-item"><div><div class="firma-pendiente-id">${escapeHtml(r.archivoVBNombre || r.archivoOriginal || "Documento")}</div><div class="history-meta">VB: ${escapeHtml(r.vbNombre||r.vbEmail||"Raúl")} · ${escapeHtml(r.fecha||"")} ${escapeHtml(r.hora||"")}</div></div><span class="vb-estado-sutil">Con VB · Pendiente</span><div class="firma-pendiente-actions"><button class="btn-small btn-gray" type="button" data-vb-cancelar="${escapeHtml(r.id)}">Cancelar VB</button><button class="btn-small btn-danger" type="button" data-vb-eliminar="${escapeHtml(r.id)}">Eliminar registro</button></div></div>`).join("") : '<div class="empty">No hay documentos pendientes de certificación con VB.</div>';
+    el.innerHTML = rows.length ? rows.map(r=>`<div class="firma-pendiente-item vb-pendiente-item"><div><div class="firma-pendiente-id">${escapeHtml(r.archivoVBNombre || r.archivoOriginal || "Documento")}</div><div class="history-meta">VB: ${escapeHtml(r.vbNombre||r.vbEmail||"Raúl")} · ${escapeHtml(r.fecha||"")} ${escapeHtml(r.hora||"")}</div></div><span class="vb-estado-sutil">Con VB · Pendiente</span>${esUsuarioVistoBueno()?`<div class="firma-pendiente-actions"><button class="btn-small btn-gray" type="button" data-vb-cancelar="${escapeHtml(r.id)}">Cancelar VB</button><button class="btn-small btn-danger" type="button" data-vb-eliminar="${escapeHtml(r.id)}">Eliminar registro</button></div>`:""}</div>`).join("") : '<div class="empty">No hay documentos pendientes de certificación con VB.</div>';
     el.querySelectorAll("[data-vb-cancelar]").forEach(b=>b.addEventListener("click",()=>gestionarRegistroVB(b.dataset.vbCancelar,"cancelar")));
     el.querySelectorAll("[data-vb-eliminar]").forEach(b=>b.addEventListener("click",()=>gestionarRegistroVB(b.dataset.vbEliminar,"eliminar")));
   } catch(e) { el.innerHTML = `<div class="empty">No se pudo cargar la bandeja: ${escapeHtml(e.message||"")}</div>`; }
 }
-
-document.addEventListener("change", e => { if (e.target?.id === "filtroEtapaAdmin") cargarHistorialEtapasAdmin(); });
 
 async function cargarHistorial() {
   const contenedor = $("historialLista");
@@ -2728,6 +2712,7 @@ function actualizarAccesoAdministrador() {
 
   const navAdmin = $("navAdministracion");
   if (navAdmin) navAdmin.classList.toggle("oculto", !esAdministradorActual);
+  $("navDetalleUsuarios")?.classList.toggle("oculto", !esAdministradorActual);
   if (navVistoBueno) navVistoBueno.classList.toggle("oculto", !esVB);
 
   const navCertificar = document.querySelector('.nav-btn[data-page="certificar"]');
@@ -2775,8 +2760,9 @@ async function cargarAdministracion() {
   estado.textContent = "";
 
   try {
-    const snap = await getDocs(collection(db,"certificaciones"));
-    const registros = snap.docs.map(d => ({...d.data(), id:d.id}))
+    const colecciones = ["documentosVB","pendientesFirma","certificaciones"];
+    const snaps = await Promise.all(colecciones.map(nombre=>getDocs(collection(db,nombre))));
+    const registros = snaps.flatMap((snap,i)=>snap.docs.map(d=>({...d.data(),id:d.id,coleccion:colecciones[i]})))
       .sort((a,b) => (b.creadoEn?.seconds || 0) - (a.creadoEn?.seconds || 0));
 
     if (!registros.length) {
@@ -2789,17 +2775,17 @@ async function cargarAdministracion() {
       <div style="overflow:auto">
         <table class="admin-table">
           <thead><tr>
-            <th></th><th>ID</th><th>Archivo</th><th>Fecha</th><th>Certificador</th>
+            <th></th><th>Etapa / ID</th><th>Archivo</th><th>Fecha</th><th>Usuario responsable</th>
           </tr></thead>
           <tbody>
             ${registros.map(r => `
               <tr>
-                <td><input class="admin-check" type="checkbox" value="${escapeHtml(r.id)}"></td>
-                <td><strong>${escapeHtml(r.id)}</strong></td>
+                <td><input class="admin-check" type="checkbox" value="${escapeHtml(r.coleccion+"|"+r.id)}"></td>
+                <td><strong>${escapeHtml(({documentosVB:"Visto Bueno",pendientesFirma:"Procesado por certificador",certificaciones:"Firma Mesa de Partes"})[r.coleccion])}</strong><br><small>${escapeHtml(r.id)}</small></td>
                 <td>${escapeHtml(r.archivoOriginal || "Documento PDF")}<br>
                     <span style="color:#64748b">${escapeHtml((r.paginasCertificadas || []).length)} página(s)</span></td>
                 <td>${escapeHtml(formatoFechaRegistro(r))}</td>
-                <td>${escapeHtml(r.certificadorNombre || r.certificadorEmail || "")}</td>
+                <td>${escapeHtml(r.vbNombre || r.vbEmail || r.certificadorNombre || r.certificadorEmail || r.firmanteNombre || r.firmanteEmail || "")}</td>
               </tr>
             `).join("")}
           </tbody>
@@ -2882,20 +2868,22 @@ async function eliminarSeleccionadosAdmin() {
   btn.disabled = true;
 
   try {
-    for (const id of ids) {
+    for (const seleccionado of ids) {
+      const [coleccion, id] = seleccionado.includes("|") ? seleccionado.split("|") : ["certificaciones", seleccionado];
+      if (!["documentosVB","pendientesFirma","certificaciones"].includes(coleccion)) continue;
       // Primero se eliminan los trozos del PDF archivado en Firestore (si
       // existen), y luego el registro principal. SAMICERT no usa Firebase
       // Storage: el PDF firmado también se conserva localmente o en la ruta
       // institucional definida por la entidad.
       try {
-        const chunksSnap = await getDocs(collection(db, "certificaciones", id, "pdfChunks"));
+        const chunksSnap = await getDocs(collection(db, coleccion, id, "pdfChunks"));
         for (const chunkDoc of chunksSnap.docs) {
           await deleteDoc(chunkDoc.ref);
         }
       } catch (chunkErr) {
         console.error(`No se pudieron eliminar los trozos de PDF de ${id}:`, chunkErr);
       }
-      await deleteDoc(doc(db,"certificaciones",id));
+      await deleteDoc(doc(db,coleccion,id));
     }
     estado.textContent = `Se eliminaron ${ids.length} registro(s), incluyendo su PDF archivado cuando existía.`;
     await cargarAdministracion();
@@ -2918,6 +2906,7 @@ function mostrarPagina(nombre) {
   if (nav) nav.classList.add("active");
 
   if (nombre === "historial") cargarHistorial();
+  if (nombre === "detalleUsuarios") cargarHistorialEtapasAdmin();
   if (nombre === "administracion") cargarAdministracion();
   if (nombre === "firmar") {
     $("hashResultadoMesa")?.classList.add("oculto");

@@ -72,6 +72,7 @@
       <button class="nav-btn" data-page="historial"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9a8.5 8.5 0 1 1 1 8.4"/><path d="M3.5 4.5v4.5H8"/><path d="M12 8.5v4l3 2"/></svg></span>Historial de Certificaciones</button>
       <button class="nav-btn" data-page="acerca"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.3"/><path d="M12 11v5.3"/><circle cx="12" cy="8" r=".9" fill="currentColor" stroke="none"/></svg></span>Acerca de SAMICERT</button>
       <button class="nav-btn" data-page="seguridad"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="10.5" width="13" height="9.5" rx="1.6"/><path d="M8.5 10.5V7a3.5 3.5 0 0 1 7 0v3.5"/><circle cx="12" cy="15" r="1.3" fill="currentColor" stroke="none"/></svg></span>Seguridad / Contraseña</button>
+      <button class="nav-btn oculto" id="navDetalleUsuarios" data-page="detalleUsuarios"><span class="nav-icon">≡</span>Detalle por usuario</button>
       <button class="nav-btn oculto" id="navAdministracion" data-page="administracion"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="15" cy="6" r="2"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="9" cy="12" r="2"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="16" cy="18" r="2"/></svg></span>Administración</button>
     </nav>
 
@@ -420,15 +421,6 @@
           <p>Registro centralizado de las certificaciones culminadas, con trazabilidad del certificador y de Mesa de Partes.</p>
         </div>
 
-        <div class="panel admin-etapas-toolbar">
-          <div class="history-toolbar"><div><div class="panel-title" style="margin:0">Reportes por etapa</div><div class="panel-subtitle">Seleccione qué listado desea consultar.</div></div>
-          <select id="filtroEtapaAdmin" aria-label="Filtrar reportes por etapa" class="history-select">
-            <option value="registradas">Certificaciones registradas</option>
-            <option value="vb">Documentos con Visto Bueno</option>
-            <option value="procesados">Documentos procesados por certificador</option>
-            <option value="mesa">Documentos con firma de Mesa de Partes</option>
-          </select></div>
-        </div>
         <div id="historialEtapasAdmin" class="admin-history-etapas"></div>
         <div class="panel">
           <div class="history-toolbar">
@@ -476,6 +468,8 @@
 
       
       
+      <section class="page" id="page-detalleUsuarios"><div class="section-head"><h2>Detalle por usuario</h2><p>Consulte los documentos con Visto Bueno, procesados por certificador y firmados por Mesa de Partes.</p></div><div class="panel"><label for="filtroDetalleEtapa"><strong>Etapa del documento</strong></label><select id="filtroDetalleEtapa" class="history-select"><option value="vb">Documentos con Visto Bueno</option><option value="procesados">Documentos procesados por certificador</option><option value="mesa">Documentos con firma de Mesa de Partes</option></select></div><div id="historialDetalleUsuarios" class="admin-history-etapas"></div></section>
+
       <section class="page" id="page-administracion">
         <div class="section-head">
           <h2>Administración de SAMICERT</h2>
@@ -502,11 +496,11 @@
         <div class="panel">
           <div class="panel-title admin-danger">Limpieza de datos de prueba</div>
           <div class="panel-subtitle">
-            Seleccione registros que correspondan a pruebas o errores y elimínelos. Esta operación es irreversible desde la aplicación.
+            Seleccione registros de Visto Bueno, procesados por certificador o firmados por Mesa de Partes para eliminarlos. Esta operación es irreversible desde la aplicación.
           </div>
           <div class="admin-note">
             <strong>Recomendación:</strong> genere un respaldo antes de eliminar información.
-            Las reglas de Firebase impiden que los certificadores eliminen registros.
+            Puede eliminar registros de todas las etapas y usuarios. Esta acción es irreversible; genere un respaldo antes de continuar.
           </div>
           <div class="admin-toolbar">
             <button class="btn-small" id="btnSeleccionarTodosAdmin">Seleccionar todos</button>

@@ -1086,6 +1086,3 @@ footer{text-align:center;color:#7b8795;font-size:10.5px;line-height:1.5;margin-t
 .vb-pendiente-item .firma-pendiente-id{font-size:12px}
 .btn-danger{background:#fff1f2!important;color:#b42318!important;border:1px solid #fecdd3!important}
 @media(max-width:800px){.vb-pendiente-item{grid-template-columns:1fr}.vb-estado-sutil{justify-self:start}}
-
-/* Reportes por etapa del historial administrativo */
-.admin-etapas-toolbar{margin-bottom:14px}.history-select{min-width:min(360px,100%);padding:10px 12px;border:1px solid var(--border,#d8dee8);border-radius:9px;background:var(--surface,#fff);color:inherit;font:inherit}.admin-etapas-lista{display:grid;gap:10px;margin-top:12px}.admin-etapas-lista .history-item{margin:0}

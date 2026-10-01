@@ -93,8 +93,8 @@ service cloud.firestore {
       allow create: if esVistoBueno()
         && request.resource.data.vbUid == request.auth.uid
         && request.resource.data.estado == "pendiente-certificador";
-      allow update: if esAdministrador() || esCertificador();
-      allow delete: if esAdministrador();
+      allow update: if esAdministrador() || esCertificador() || (esVistoBueno() && resource.data.vbUid == request.auth.uid);
+      allow delete: if esAdministrador() || (esVistoBueno() && resource.data.vbUid == request.auth.uid && resource.data.estado in ["pendiente-certificador", "cancelado"]);
     }
 
     match /certificaciones/{certificacionId} {
