@@ -146,7 +146,7 @@ const USUARIOS_AUTORIZADOS = {
 
 const USUARIOS_VISTO_BUENO = {
   [VISTO_BUENO_UID]: {
-    nombre: "Raúl",
+    nombre: "Raúl Alberto Rodríguez Calderón",
     correo: VISTO_BUENO_EMAIL,
     sello: "./sello-vb.png"
   }
@@ -2553,15 +2553,22 @@ async function gestionarRegistroVB(id, accion) {
 }
 
 async function cargarBandejaVB() {
-  const el = $("bandejaVBLista"); if (!el || !usuarioActual) return;
-  el.innerHTML = '<div class="empty">Cargando documentos con Visto Bueno…</div>';
+  const targets = [$('bandejaVBLista'), $('bandejaVBListaVB')].filter(Boolean);
+  if (!targets.length || !usuarioActual) return;
+  targets.forEach(el => el.innerHTML = '<div class="empty">Cargando documentos con Visto Bueno…</div>');
   try {
     const snap = await getDocs(collection(db, "documentosVB"));
-    const rows = snap.docs.map(d=>({...d.data(), id:d.id})).filter(r=>r.estado === "pendiente-certificador").sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
-    el.innerHTML = rows.length ? rows.map(r=>`<div class="firma-pendiente-item vb-pendiente-item"><div><div class="firma-pendiente-id">${escapeHtml(r.archivoVBNombre || r.archivoOriginal || "Documento")}</div><div class="history-meta">VB: ${escapeHtml(r.vbNombre||r.vbEmail||"Raúl")} · ${escapeHtml(r.fecha||"")} ${escapeHtml(r.hora||"")}</div></div><span class="vb-estado-sutil">Con VB · Pendiente</span>${esUsuarioVistoBueno()?`<div class="firma-pendiente-actions"><button class="btn-small btn-gray" type="button" data-vb-cancelar="${escapeHtml(r.id)}">Cancelar VB</button><button class="btn-small btn-danger" type="button" data-vb-eliminar="${escapeHtml(r.id)}">Eliminar registro</button></div>`:""}</div>`).join("") : '<div class="empty">No hay documentos pendientes de certificación con VB.</div>';
-    el.querySelectorAll("[data-vb-cancelar]").forEach(b=>b.addEventListener("click",()=>gestionarRegistroVB(b.dataset.vbCancelar,"cancelar")));
-    el.querySelectorAll("[data-vb-eliminar]").forEach(b=>b.addEventListener("click",()=>gestionarRegistroVB(b.dataset.vbEliminar,"eliminar")));
-  } catch(e) { el.innerHTML = `<div class="empty">No se pudo cargar la bandeja: ${escapeHtml(e.message||"")}</div>`; }
+    const rows = snap.docs.map(d=>({...d.data(), id:d.id}))
+      .filter(r => esUsuarioVistoBueno()
+        ? ((r.vbUid && r.vbUid === usuarioActual.uid) || (r.vbEmail || '').toLowerCase() === (usuarioActual.email || '').toLowerCase() || (!r.vbUid && !r.vbEmail && ['pendiente-certificador','cancelado'].includes(r.estado)))
+        : r.estado === "pendiente-certificador")
+      .sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
+    targets.forEach(el => {
+      el.innerHTML = rows.length ? rows.map(r=>`<div class="firma-pendiente-item vb-pendiente-item"><div><div class="firma-pendiente-id">${escapeHtml(r.archivoVBNombre || r.archivoOriginal || "Documento")}</div><div class="history-meta">VB: ${escapeHtml(r.vbNombre||r.vbEmail||"Raúl Alberto Rodríguez Calderón")} · ${escapeHtml(r.fecha||"")} ${escapeHtml(r.hora||"")}</div></div><span class="vb-estado-sutil">${escapeHtml(r.estado||"Con VB")}</span>${esUsuarioVistoBueno()?`<div class="firma-pendiente-actions"><button class="btn-small btn-gray" type="button" data-vb-cancelar="${escapeHtml(r.id)}">Cancelar VB</button><button class="btn-small btn-danger" type="button" data-vb-eliminar="${escapeHtml(r.id)}">Eliminar registro</button></div>`:""}</div>`).join("") : '<div class="empty">No hay documentos con Visto Bueno registrados.</div>';
+      el.querySelectorAll("[data-vb-cancelar]").forEach(b=>b.addEventListener("click",()=>gestionarRegistroVB(b.dataset.vbCancelar,"cancelar")));
+      el.querySelectorAll("[data-vb-eliminar]").forEach(b=>b.addEventListener("click",()=>gestionarRegistroVB(b.dataset.vbEliminar,"eliminar")));
+    });
+  } catch(e) { targets.forEach(el => el.innerHTML = `<div class="empty">No se pudo cargar la bandeja: ${escapeHtml(e.message||"")}</div>`); }
 }
 
 async function cargarHistorial() {
@@ -3196,3 +3203,6 @@ onAuthStateChanged(auth,async user => {
 });
 
 renderLista();
+
+
+$("filtroDetalleEtapa")?.addEventListener("change", () => cargarHistorialEtapasAdmin());
