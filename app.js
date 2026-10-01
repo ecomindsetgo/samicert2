@@ -2612,20 +2612,14 @@ async function cargarHistorialEtapasAdmin() {
 async function gestionarRegistroVB(id, accion) {
   if (!esUsuarioVistoBueno()) return;
   if (!esUsuarioVistoBueno() || !usuarioActual) { mostrarEstadoVB("Solo el usuario de Visto Bueno puede realizar esta acción.","error"); return; }
-  const mensaje = accion === "cancelar-eliminar"
-    ? "¿Cancelar / eliminar este documento con Visto Bueno?
-
-El registro dejará de aparecer en esta bandeja y en la bandeja del certificador. El PDF guardado no será eliminado."
-    : accion === "eliminar"
-      ? "¿Eliminar el registro de VB? Esta acción no elimina el PDF guardado."
-      : "¿Cancelar este Visto Bueno? El documento dejará de aparecer como pendiente para el certificador.";
+  const mensaje = "¿Cancelar / eliminar este documento con Visto Bueno?\n\nEl registro dejará de aparecer en esta bandeja y en la bandeja del certificador. El PDF guardado no será eliminado.";
   if (!confirm(mensaje)) return;
   try {
     const ref = doc(db,"documentosVB",id);
     if (accion === "eliminar" || accion === "cancelar-eliminar") await deleteDoc(ref);
     else await setDoc(ref,{estado:"cancelado", canceladoPor:usuarioActual.uid, canceladoNombre:perfilActual?.nombre||usuarioActual.email||"", canceladoEn:serverTimestamp()}, {merge:true});
     await cargarBandejaVB();
-    mostrarEstadoVB(accion === "cancelar-eliminar" ? "Documento cancelado/eliminado; el PDF no fue borrado." : accion === "eliminar" ? "Registro eliminado; el PDF no fue borrado." : "Visto Bueno cancelado.");
+    mostrarEstadoVB("Documento cancelado/eliminado; el PDF no fue borrado.");
   } catch(e) { mostrarEstadoVB("No se pudo actualizar el registro: "+(e.message||""),"error"); }
 }
 
@@ -2652,7 +2646,7 @@ async function cargarBandejaVB() {
             <div class="history-file">${escapeHtml(r.archivoVBNombre || r.archivoOriginal || "Documento PDF")}</div>
             <div class="history-meta">
               ${escapeHtml(r.fecha || "")} ${escapeHtml(r.hora || "")} ·
-              Visto Bueno: <strong>${escapeHtml(esUsuarioVistoBueno() ? "Raúl Rodríguez Calderón" : (r.vbNombre || r.vbEmail || "Raúl Rodríguez Calderón"))}</strong>
+              Visto Bueno: <strong>${escapeHtml("Raúl Rodríguez Calderón")}</strong>
             </div>
             <div class="history-meta" style="margin-top:2px">
               Estado: <strong>${escapeHtml(r.estado === "cancelado" ? "Cancelado" : "Pendiente de certificador")}</strong>
@@ -3219,16 +3213,6 @@ async function cargarPerfil(user) {
         await setDoc(doc(db,"usuarios",user.uid), { nombre:"Mesa de Partes" }, { merge:true });
       } catch (err) {
         console.warn("No se pudo corregir el nombre guardado de Mesa de Partes:", err);
-      }
-    }
-
-    // Autocorrección del nombre del usuario de Visto Bueno.
-    if (esVB && perfilActual.nombre !== "Raúl Rodríguez Calderón") {
-      perfilActual.nombre = "Raúl Rodríguez Calderón";
-      try {
-        await setDoc(doc(db,"usuarios",user.uid), { nombre:"Raúl Rodríguez Calderón" }, { merge:true });
-      } catch (err) {
-        console.warn("No se pudo corregir el nombre guardado de Visto Bueno:", err);
       }
     }
   }
