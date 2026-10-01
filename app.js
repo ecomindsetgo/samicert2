@@ -998,8 +998,8 @@ async function aplicarVistoBuenoAUnPdf(file) {
   const paginas = pdfDoc.getPages();
   if (!paginas.length) throw new Error("El PDF no contiene páginas.");
 
-  const tamanoVB = 58;
-  const margenDerechoVB = 45;
+  const tamanoVB = 72;
+  const margenDerechoVB = 85;
   const margenSuperiorVB = 14;
   const paginasVB = paginas.filter((_, indice) => paginasSeleccionadas.has(indice + 1));
   if (!paginasVB.length) throw new Error("Seleccione al menos una página para colocar el Visto Bueno.");
@@ -1052,6 +1052,20 @@ async function guardarDocumentoVB() {
     }
 
     const resultado = await guardarResultado(bytes, nombreSalidaVB, handleDestino, null);
+    // Registrar el ingreso en la bandeja compartida de certificación. El PDF sigue guardándose en la carpeta compartida local.
+    const vbId = (crypto.randomUUID ? crypto.randomUUID() : `VB-${Date.now()}-${Math.random().toString(36).slice(2,8)}`);
+    const ahoraVB = new Date();
+    await setDoc(doc(db, "documentosVB", vbId), {
+      archivoOriginal: archivoVBActual.name,
+      archivoVBNombre: resultado.nombre || nombreSalidaVB,
+      estado: "pendiente-certificador",
+      vbUid: usuarioActual.uid,
+      vbNombre: perfilActual?.nombre || usuarioActual.displayName || usuarioActual.email || "Raúl",
+      vbEmail: usuarioActual.email || "",
+      fecha: ahoraVB.toLocaleDateString("es-PE", {timeZone:"America/Lima"}),
+      hora: ahoraVB.toLocaleTimeString("es-PE", {timeZone:"America/Lima"}),
+      creadoEn: serverTimestamp()
+    });
     mostrarEstadoVB(`✓ Visto Bueno aplicado correctamente. Archivo guardado como ${resultado.nombre || nombreSalidaVB}.`);
     limpiarVistoBueno();
     mostrarEstadoVB(`✓ Visto Bueno aplicado correctamente. Archivo guardado como ${resultado.nombre || nombreSalidaVB}.`);
@@ -1979,6 +1993,21 @@ btnAplicar.addEventListener("click", async () => {
     };
 
     await setDoc(doc(db, "pendientesFirma", pendienteId), pendiente);
+    // Marcar el registro VB correspondiente como atendido por el certificador.
+    try {
+      const vbPendientes = await getDocs(collection(db, "documentosVB"));
+      const nombreBase = String(resultado.meta.archivoOriginal || "").replace(/\[VB\](?=\.pdf$)/i, "").toLowerCase();
+      const vbMatch = vbPendientes.docs.find(d => {
+        const r = d.data();
+        return r.estado === "pendiente-certificador" && String(r.archivoOriginal || "").replace(/\[VB\](?=\.pdf$)/i, "").toLowerCase() === nombreBase;
+      });
+      if (vbMatch) await setDoc(doc(db, "documentosVB", vbMatch.id), {
+        estado: "procesado-certificador", certificadorUid: usuarioActual.uid,
+        certificadorNombre: perfilActual?.nombre || usuarioActual.displayName || usuarioActual.email || "",
+        certificadorEmail: usuarioActual.email || "", pendienteFirmaId: pendienteId,
+        atendidoEn: serverTimestamp()
+      }, { merge: true });
+    } catch (eVB) { console.warn("No se pudo actualizar el estado del registro VB", eVB); }
 
     procesoFirmaPendiente = pendiente;
     archivoSeleccionado.estado = "enviado-firma";
@@ -2026,6 +2055,7 @@ let pendienteFirmaActual = null;
 // y que siguen "pendiente-firma", y cancelarlos si se equivocó de archivo
 // (por ejemplo, si generó el [SF] de un PDF que no correspondía).
 async function cargarMisPendientesFirma() {
+  cargarBandejaVB();
   if (!usuarioActual || esUsuarioMesaPartes()) return;
   const contenedor = $("misPendientesLista");
   if (!contenedor) return;
@@ -2494,12 +2524,35 @@ function fechaRegistroEnMs(r) {
   return 0;
 }
 
+async function cargarHistorialEtapasAdmin() {
+  const cont = $("historialEtapasAdmin"); if (!cont || usuarioActual?.uid !== ADMIN_UID) return;
+  try {
+    const [vbSnap, pendSnap, certSnap] = await Promise.all([getDocs(collection(db,"documentosVB")),getDocs(collection(db,"pendientesFirma")),getDocs(collection(db,"certificaciones"))]);
+    const render = (arr, fn) => arr.length ? arr.map(fn).join("") : '<div class="empty">Sin registros.</div>';
+    const vb = vbSnap.docs.map(d=>({...d.data(),id:d.id}));
+    const pend = pendSnap.docs.map(d=>({...d.data(),id:d.id}));
+    const cert = certSnap.docs.map(d=>({...d.data(),id:d.id}));
+    cont.innerHTML = `<div class="panel"><h3>Documentos con Visto Bueno (${vb.length})</h3>${render(vb,r=>`<div class="history-meta">${escapeHtml(r.archivoVBNombre||r.archivoOriginal||r.id)} · ${escapeHtml(r.vbNombre||r.vbEmail||"")} · ${escapeHtml(r.fecha||"")} ${escapeHtml(r.hora||"")} · ${escapeHtml(r.estado||"")}</div>`)}</div><div class="panel"><h3>Documentos procesados por certificador (${pend.length})</h3>${render(pend,r=>`<div class="history-meta">${escapeHtml(r.archivoProvisionalNombre||r.archivoOriginal||r.id)} · ${escapeHtml(r.certificadorNombre||r.certificadorEmail||"")} · ${escapeHtml(r.fecha||"")} ${escapeHtml(r.hora||"")} · ${escapeHtml(r.estado||"")}</div>`)}</div><div class="panel"><h3>Documentos con firma de Mesa de Partes (${cert.length})</h3>${render(cert,r=>`<div class="history-meta">${escapeHtml(r.archivoCertificadoNombre||r.archivoOriginal||r.id)} · Certificador: ${escapeHtml(r.certificadorNombre||r.certificadorEmail||"")} · Mesa de Partes: ${escapeHtml(r.firmanteEmail||r.firmanteNombre||"")} · ${escapeHtml(r.fecha||"")} ${escapeHtml(r.hora||"")}</div>`)}</div>`;
+  } catch(e) { cont.innerHTML = `<div class="empty">No se pudo cargar el historial por etapas: ${escapeHtml(e.message||"")}</div>`; }
+}
+
+async function cargarBandejaVB() {
+  const el = $("bandejaVBLista"); if (!el || !usuarioActual) return;
+  el.innerHTML = '<div class="empty">Cargando documentos con Visto Bueno…</div>';
+  try {
+    const snap = await getDocs(collection(db, "documentosVB"));
+    const rows = snap.docs.map(d=>({...d.data(), id:d.id})).filter(r=>r.estado === "pendiente-certificador").sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
+    el.innerHTML = rows.length ? rows.map(r=>`<div class="firma-pendiente-item"><div><strong>${escapeHtml(r.archivoVBNombre || r.archivoOriginal || "Documento")}</strong><div class="history-meta">VB: ${escapeHtml(r.vbNombre||r.vbEmail||"Raúl")} · ${escapeHtml(r.fecha||"")} ${escapeHtml(r.hora||"")}</div><div class="history-meta">Busque este PDF [VB] en la carpeta compartida, luego selecciónelo en “Documento PDF” para certificarlo.</div></div><span class="badge-pendiente">Pendiente</span></div>`).join("") : '<div class="empty">No hay documentos pendientes de certificación con VB.</div>';
+  } catch(e) { el.innerHTML = `<div class="empty">No se pudo cargar la bandeja: ${escapeHtml(e.message||"")}</div>`; }
+}
+
 async function cargarHistorial() {
   const contenedor = $("historialLista");
   contenedor.innerHTML = '<div class="empty">Cargando historial…</div>';
   $("historialPaginacion").classList.add("oculto");
 
   try {
+    await cargarHistorialEtapasAdmin();
     const snap = await getDocs(collection(db,"certificaciones"));
     historialRegistros = snap.docs.map(d => ({...d.data(), id:d.id}));
 

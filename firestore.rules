@@ -86,6 +86,17 @@ service cloud.firestore {
       }
     }
 
+
+    // Trazabilidad del primer paso: documentos que recibieron Visto Bueno.
+    match /documentosVB/{documentoId} {
+      allow read: if esAdministrador() || esCertificador() || esVistoBueno();
+      allow create: if esVistoBueno()
+        && request.resource.data.vbUid == request.auth.uid
+        && request.resource.data.estado == "pendiente-certificador";
+      allow update: if esAdministrador() || esCertificador();
+      allow delete: if esAdministrador();
+    }
+
     match /certificaciones/{certificacionId} {
       allow get: if true;
       allow list: if esAdministrador() || esCertificador() || esMesaPartes();
