@@ -534,7 +534,7 @@ async function cargarVisorPaginas(file) {
 
       const estadoEl = document.createElement("span");
       estadoEl.className = "pagina-estado";
-      estadoEl.textContent = "Certificar";
+      estadoEl.textContent = "VB";
 
       const giroEl = document.createElement("span");
       giroEl.className = "pagina-giro oculto";
@@ -544,7 +544,7 @@ async function cargarVisorPaginas(file) {
       check.type = "checkbox";
       check.className = "pagina-check";
       check.checked = true;
-      check.setAttribute("aria-label", `Certificar página ${numero}`);
+      check.setAttribute("aria-label", `Colocar VB en página ${numero}`);
 
       meta.append(numeroEl, giroEl, estadoEl);
 
@@ -589,12 +589,12 @@ async function cargarVisorPaginas(file) {
           paginasSeleccionadas.add(numero);
           card.classList.add("seleccionada");
           card.classList.remove("no-seleccionada");
-          estadoEl.textContent = "Certificar";
+          estadoEl.textContent = "VB";
         } else {
           paginasSeleccionadas.delete(numero);
           card.classList.remove("seleccionada");
           card.classList.add("no-seleccionada");
-          estadoEl.textContent = "No certificar";
+          estadoEl.textContent = "No VB";
         }
         actualizarResumenPaginas();
       };
@@ -734,6 +734,10 @@ function visorPaginas() {
 
 async function abrirVistaAmpliada(numero) {
   if (!pdfVista) return;
+  // Determinar el modo cada vez que se abre la lupa. Al cerrar el modal,
+  // visorModalModo vuelve a "certificar", por lo que debe restaurarse aquí
+  // según el visor desde el que se abrió.
+  visorModalModo = visorPaginasActivoId === "visorPaginasVB" ? "vb" : "certificar";
   try {
     visorModalPaginaActual = numero;
     visorModalRotacionExtra = Number(rotacionesPagina.get(numero) || 0);
@@ -746,12 +750,10 @@ async function abrirVistaAmpliada(numero) {
     await renderPaginaModal(pagina);
     $("visorModalTitulo").textContent = `Página ${numero} — vista ampliada`;
     const btnModalSeleccion = $("btnAlternarSeleccionModal");
-    if (btnModalSeleccion) btnModalSeleccion.textContent = visorModalModo === "vb" ? "✓ VB" : "✓ Certificar";
+    if (btnModalSeleccion) btnModalSeleccion.textContent = "✓ VB";
     const ayudaModal = $("visorModalAyuda");
     if (ayudaModal) {
-      ayudaModal.textContent = visorModalModo === "vb"
-        ? "Use ‹ Anterior / Siguiente › para cambiar de página sin cerrar el visor. También puede usar ←/→. Con ✓ VB / No VB puede cambiar la selección directamente desde este visor."
-        : "Use ‹ Anterior / Siguiente › para cambiar de página sin cerrar el visor. También puede usar ←/→. Con ✓ Certificar / No certificar puede cambiar la selección directamente desde este visor.";
+      ayudaModal.textContent = "Use ‹ Anterior / Siguiente › para cambiar de página sin cerrar el visor. También puede usar ←/→. Con ✓ VB / No VB puede cambiar la selección directamente desde este visor.";
     }
     $("visorModal").classList.remove("oculto");
     actualizarControlesNavegacionModal();
@@ -805,9 +807,7 @@ function actualizarBotonSeleccionModal() {
   const boton = $("btnAlternarSeleccionModal");
   if (!boton || !visorModalPaginaActual) return;
   const seleccionada = paginasSeleccionadas.has(visorModalPaginaActual);
-  boton.textContent = visorModalModo === "vb"
-    ? (seleccionada ? "✓ VB" : "○ No VB")
-    : (seleccionada ? "✓ Certificar" : "○ No certificar");
+  boton.textContent = seleccionada ? "✓ VB" : "○ No VB";
   boton.classList.toggle("activo", seleccionada);
 }
 
