@@ -81,8 +81,6 @@ const btnAplicarVB = $("btnAplicarVB");
 const btnLimpiarVB = $("btnLimpiarVB");
 const archivoVBSeleccionado = $("archivoVBSeleccionado");
 const vbEstado = $("vbEstado");
-const btnBuscarVB = $("btnBuscarVB");
-const listaArchivosVB = $("listaArchivosVB");
 
 const idConsultaInicial = new URLSearchParams(window.location.search).get("consulta");
 if (idConsultaInicial) {
@@ -150,7 +148,7 @@ const USUARIOS_VISTO_BUENO = {
   [VISTO_BUENO_UID]: {
     nombre: "Raúl",
     correo: VISTO_BUENO_EMAIL,
-    sello: "./VB RAUL.png"
+    sello: "./sello-vb.png"
   }
 };
 
@@ -463,18 +461,25 @@ function renderLista() {
 
 function actualizarResumenPaginas() {
   const n = paginasSeleccionadas.size;
-  $("resumenPaginas").textContent =
-    `${n} de ${totalPaginas} página(s) seleccionada(s) para certificar.`;
-  btnAplicar.disabled = !archivoSeleccionado || n === 0 || !selloBytes;
+  $(resumenPaginasActivoId).textContent =
+    `${n} de ${totalPaginas} página(s) seleccionada(s).`;
+  if (visorPaginasActivoId === "visorPaginasVB") {
+    if (btnAplicarVB) btnAplicarVB.disabled = !archivoVBActual || n === 0 || !selloVBBytes;
+  } else {
+    btnAplicar.disabled = !archivoSeleccionado || n === 0 || !selloBytes;
+  }
 }
 
 async function cargarVisorPaginas(file) {
-  const selector = $("selectorPaginas");
-  const visor = $("visorPaginas");
+  visorPaginasActivoId = "visorPaginas";
+  resumenPaginasActivoId = "resumenPaginas";
+  selectorPaginasActivoId = "selectorPaginas";
+  const selector = $(selectorPaginasActivoId);
+  const visor = $(visorPaginasActivoId);
 
   selector.classList.remove("oculto");
   visor.innerHTML = '<div class="visor-cargando">Cargando vista previa de las páginas…</div>';
-  $("resumenPaginas").textContent = "Cargando páginas…";
+  $(resumenPaginasActivoId).textContent = "Cargando páginas…";
 
   try {
     const bytes = await file.arrayBuffer();
@@ -494,7 +499,7 @@ async function cargarVisorPaginas(file) {
 
     for (let numero=1; numero<=totalPaginas; numero++) {
       if (totalPaginas > 1) {
-        $("resumenPaginas").textContent =
+        $(resumenPaginasActivoId).textContent =
           `Cargando vista previa… (${numero} de ${totalPaginas})`;
       }
 
@@ -606,10 +611,71 @@ async function cargarVisorPaginas(file) {
     console.error(error);
     visor.innerHTML =
       '<div class="visor-cargando">No se pudo mostrar la vista previa del PDF.</div>';
-    $("resumenPaginas").textContent =
+    $(resumenPaginasActivoId).textContent =
       "No fue posible cargar el selector de páginas.";
     paginasSeleccionadas.clear();
     actualizarResumenPaginas();
+  }
+}
+
+
+async function cargarVisorPaginasVB(file) {
+  visorPaginasActivoId = "visorPaginasVB";
+  resumenPaginasActivoId = "resumenPaginasVB";
+  selectorPaginasActivoId = "selectorPaginasVB";
+  const selector = $(selectorPaginasActivoId);
+  const visor = $(visorPaginasActivoId);
+  selector.classList.remove("oculto");
+  visor.innerHTML = '<div class="visor-cargando">Cargando vista previa de las páginas…</div>';
+  $(resumenPaginasActivoId).textContent = "Cargando páginas…";
+  try {
+    const bytes = await file.arrayBuffer();
+    pdfVista = await pdfjsLib.getDocument({data:bytes}).promise;
+    totalPaginas = pdfVista.numPages;
+    if (!totalPaginas) throw new Error("El PDF no contiene páginas legibles.");
+    paginasSeleccionadas = new Set(Array.from({length:totalPaginas}, (_,i)=>i+1));
+    rotacionesPagina = new Map();
+    canvasesPorPagina = new Map();
+    visor.innerHTML = "";
+    for (let numero=1; numero<=totalPaginas; numero++) {
+      if (totalPaginas > 1) $(resumenPaginasActivoId).textContent = `Cargando vista previa… (${numero} de ${totalPaginas})`;
+      const card=document.createElement("div");
+      card.className="pagina-card seleccionada";
+      card.dataset.page=String(numero);
+      const controles=document.createElement("div"); controles.className="visor-controles";
+      const lupa=document.createElement("button"); lupa.type="button"; lupa.className="visor-lupa"; lupa.innerHTML=ICONOS.lupa; lupa.title="Ver página ampliada";
+      const rotar=document.createElement("button"); rotar.type="button"; rotar.className="visor-rotar"; rotar.innerHTML=ICONOS.rotar; rotar.title="Rotar página 90° — el giro se guardará en el PDF con VB";
+      const meta=document.createElement("div"); meta.className="pagina-meta";
+      const numeroEl=document.createElement("span"); numeroEl.className="pagina-numero"; numeroEl.textContent=`Página ${numero}`;
+      const estadoEl=document.createElement("span"); estadoEl.className="pagina-estado"; estadoEl.textContent="VB";
+      const giroEl=document.createElement("span"); giroEl.className="pagina-giro oculto";
+      const check=document.createElement("input"); check.type="checkbox"; check.className="pagina-check"; check.checked=true; check.setAttribute("aria-label",`Colocar VB en página ${numero}`);
+      meta.append(numeroEl,giroEl,estadoEl);
+      try {
+        const pagina=await pdfVista.getPage(numero); const canvas=document.createElement("canvas");
+        lupa.addEventListener("click",e=>{e.stopPropagation(); abrirVistaAmpliada(numero);});
+        rotar.addEventListener("click",async e=>{e.stopPropagation(); await rotarPaginaParaSalida(numero);});
+        controles.append(lupa,rotar); card.append(controles,canvas,meta,check); visor.appendChild(card); canvasesPorPagina.set(numero,canvas);
+        await renderMiniaturaPagina(numero);
+      } catch (errorPagina) {
+        console.error(`No se pudo previsualizar la página ${numero}:`,errorPagina);
+        const aviso=document.createElement("div"); aviso.className="pagina-error"; aviso.textContent="Sin vista previa";
+        lupa.disabled=true; rotar.disabled=true; controles.append(lupa,rotar); card.append(controles,aviso,meta,check); visor.appendChild(card);
+      }
+      const actualizar=()=>{
+        const activa=check.checked;
+        if(activa){paginasSeleccionadas.add(numero);card.classList.add("seleccionada");card.classList.remove("no-seleccionada");estadoEl.textContent="VB";}
+        else{paginasSeleccionadas.delete(numero);card.classList.remove("seleccionada");card.classList.add("no-seleccionada");estadoEl.textContent="No VB";}
+        actualizarResumenPaginas();
+      };
+      check.addEventListener("change",actualizar);
+      card.addEventListener("click",e=>{if(e.target===check)return;check.checked=!check.checked;actualizar();});
+    }
+    actualizarResumenPaginas();
+  } catch(error) {
+    console.error(error); visor.innerHTML='<div class="visor-cargando">No se pudo mostrar la vista previa del PDF.</div>';
+    $(resumenPaginasActivoId).textContent="No fue posible cargar el selector de páginas.";
+    paginasSeleccionadas.clear(); actualizarResumenPaginas();
   }
 }
 
@@ -619,6 +685,9 @@ let visorModalZoom = 1;
 let visorModalRotacionExtra = 0;
 let rotacionesPagina = new Map();
 let canvasesPorPagina = new Map();
+let visorPaginasActivoId = "visorPaginas";
+let resumenPaginasActivoId = "resumenPaginas";
+let selectorPaginasActivoId = "selectorPaginas";
 
 async function renderMiniaturaPagina(numero) {
   const canvas = canvasesPorPagina.get(numero);
@@ -657,7 +726,7 @@ function actualizarBadgeGiro(numero) {
 }
 
 function visorPaginas() {
-  return $("visorPaginas");
+  return $(visorPaginasActivoId);
 }
 
 async function abrirVistaAmpliada(numero) {
@@ -838,7 +907,7 @@ async function cargarSelloVistoBueno() {
   } catch (error) {
     console.error(error);
     selloVBBytes = null;
-    throw new Error("No se pudo cargar VB RAUL.png. Verifique que el archivo esté publicado junto a index.html.");
+    throw new Error("No se pudo cargar el sello de Visto Bueno. Verifique que el archivo esté publicado junto a index.html.");
   }
 }
 
@@ -877,6 +946,16 @@ function limpiarVistoBueno() {
     vbEstado.classList.add("oculto");
     vbEstado.innerHTML = "";
   }
+  if ($("selectorPaginasVB")) $("selectorPaginasVB").classList.add("oculto");
+  if ($("visorPaginasVB")) $("visorPaginasVB").innerHTML = "";
+  pdfVista = null;
+  totalPaginas = 0;
+  paginasSeleccionadas = new Set();
+  rotacionesPagina = new Map();
+  canvasesPorPagina = new Map();
+  visorPaginasActivoId = "visorPaginas";
+  resumenPaginasActivoId = "resumenPaginas";
+  selectorPaginasActivoId = "selectorPaginas";
 }
 
 function seleccionarPdfParaVB(file) {
@@ -886,12 +965,13 @@ function seleccionarPdfParaVB(file) {
   }
   archivoVBActual = file;
   if (archivoVBSeleccionado) {
-    archivoVBSeleccionado.innerHTML = `<strong>PDF seleccionado:</strong> ${escapeHtml(file.name)}<br><span>El sello VB se colocará en todas las páginas.</span>`;
+    archivoVBSeleccionado.innerHTML = `<strong>PDF seleccionado:</strong> ${escapeHtml(file.name)}`;
     archivoVBSeleccionado.classList.remove("oculto");
   }
   if (btnAplicarVB) btnAplicarVB.disabled = !selloVBBytes;
   if (btnLimpiarVB) btnLimpiarVB.disabled = false;
   if (vbEstado) vbEstado.classList.add("oculto");
+  cargarVisorPaginasVB(file);
 }
 
 async function aplicarVistoBuenoAUnPdf(file) {
@@ -912,19 +992,28 @@ async function aplicarVistoBuenoAUnPdf(file) {
     sello = await pdfDoc.embedPng(selloVBBytes);
   } catch (e) {
     console.error(e);
-    throw new Error("No se pudo incrustar VB RAUL.png.");
+    throw new Error("No se pudo incrustar el sello de Visto Bueno.");
   }
 
   const paginas = pdfDoc.getPages();
   if (!paginas.length) throw new Error("El PDF no contiene páginas.");
 
-  const tamanoVB = 82;
-  const margenVB = 24;
-  const esquinaVB = "superior-derecha";
+  const tamanoVB = 58;
+  const margenDerechoVB = 45;
+  const margenSuperiorVB = 14;
+  const paginasVB = paginas.filter((_, indice) => paginasSeleccionadas.has(indice + 1));
+  if (!paginasVB.length) throw new Error("Seleccione al menos una página para colocar el Visto Bueno.");
 
-  paginas.forEach(pagina => {
-    const rotacion = normalizarRotacionPagina(pagina);
-    const posicion = calcularPosicionSello(pagina, esquinaVB, tamanoVB, margenVB, rotacion);
+  paginasVB.forEach(pagina => {
+    const numeroPagina = paginas.indexOf(pagina) + 1;
+    const giroAdicional = Number(rotacionesPagina.get(numeroPagina) || 0);
+    if (giroAdicional) {
+      pagina.setRotation(PDFLib.degrees((normalizarRotacionPagina(pagina) + giroAdicional) % 360));
+    }
+    const posicion = calcularPosicionSelloSuperiorDerecha(
+      pagina, tamanoVB, margenDerechoVB, margenSuperiorVB,
+      normalizarRotacionPagina(pagina)
+    );
     pagina.drawImage(sello, {
       x: posicion.x,
       y: posicion.y,
@@ -973,59 +1062,6 @@ async function guardarDocumentoVB() {
   }
 }
 
-async function buscarArchivosVBEnCarpeta() {
-  if (!usuarioActual || esUsuarioVistoBueno() || !btnBuscarVB) return;
-  if (!("showDirectoryPicker" in window)) {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "application/pdf,.pdf";
-    input.addEventListener("change", () => {
-      const file = input.files?.[0];
-      if (file) seleccionarPdf(file);
-    });
-    input.click();
-    return;
-  }
-
-  try {
-    const dirHandle = await window.showDirectoryPicker({ mode: "read" });
-    const archivos = [];
-    for await (const entry of dirHandle.values()) {
-      if (entry.kind !== "file" || !/\[VB\]\.pdf$/i.test(entry.name)) continue;
-      const file = await entry.getFile();
-      archivos.push({ entry, file });
-    }
-    archivos.sort((a,b) => a.file.name.localeCompare(b.file.name, "es", {numeric:true}));
-
-    if (!listaArchivosVB) return;
-    listaArchivosVB.classList.remove("oculto");
-    if (!archivos.length) {
-      listaArchivosVB.innerHTML = '<div class="empty">No se encontraron archivos con terminación [VB].pdf en la carpeta seleccionada.</div>';
-      return;
-    }
-
-    listaArchivosVB.innerHTML = archivos.map((item, i) => `
-      <div class="vb-archivo-item">
-        <div style="min-width:0">
-          <div class="vb-nombre">${escapeHtml(item.file.name)}</div>
-          <div class="vb-meta">${item.file.size.toLocaleString()} bytes · archivo con Visto Bueno</div>
-        </div>
-        <button type="button" class="btn-small btn-cargar-vb" data-index="${i}">Cargar</button>
-      </div>`).join("");
-
-    listaArchivosVB.querySelectorAll(".btn-cargar-vb").forEach(btn => {
-      btn.addEventListener("click", () => seleccionarPdf(archivos[Number(btn.dataset.index)].file));
-    });
-  } catch (err) {
-    if (err?.name === "AbortError") return;
-    console.error(err);
-    if (listaArchivosVB) {
-      listaArchivosVB.classList.remove("oculto");
-      listaArchivosVB.innerHTML = `<div class="empty">No se pudo abrir la carpeta: ${escapeHtml(err.message || "")}</div>`;
-    }
-  }
-}
-
 dropVB?.addEventListener("click", () => inputPdfVB?.click());
 inputPdfVB?.addEventListener("change", () => seleccionarPdfParaVB(inputPdfVB.files?.[0] || null));
 dropVB?.addEventListener("dragover", e => { e.preventDefault(); dropVB.classList.add("dragover"); });
@@ -1037,7 +1073,6 @@ dropVB?.addEventListener("drop", e => {
 });
 btnAplicarVB?.addEventListener("click", guardarDocumentoVB);
 btnLimpiarVB?.addEventListener("click", limpiarVistoBueno);
-btnBuscarVB?.addEventListener("click", buscarArchivosVBEnCarpeta);
 
 function resetearEstadoSesion() {
   cerrarVistaAmpliada();
@@ -1059,7 +1094,6 @@ function resetearEstadoSesion() {
   if (btnAplicarVB) btnAplicarVB.disabled = true;
   if (btnLimpiarVB) btnLimpiarVB.disabled = true;
   if (vbEstado) { vbEstado.classList.add("oculto"); vbEstado.innerHTML = ""; }
-  if (listaArchivosVB) { listaArchivosVB.classList.add("oculto"); listaArchivosVB.innerHTML = ""; }
   perfilActual = null;
   esAdministradorActual = false;
   actualizarAccesoAdministrador();
@@ -1162,6 +1196,9 @@ function limpiarArchivo(opciones) {
   paginasSeleccionadas.clear();
   totalPaginas = 0;
   pdfVista = null;
+  visorPaginasActivoId = "visorPaginas";
+  resumenPaginasActivoId = "resumenPaginas";
+  selectorPaginasActivoId = "selectorPaginas";
   duplicadosDetectados = [];
   hashOrigenActual = null;
   mostrarAlertaDuplicado([]);
@@ -1197,30 +1234,23 @@ drop.addEventListener("drop", e => {
 
 btnLimpiar.addEventListener("click", limpiarArchivo);
 
-$("btnTodas").onclick = () => {
-  document.querySelectorAll(".pagina-check").forEach(c => {
-    if (!c.checked) {
-      c.checked = true;
-      c.dispatchEvent(new Event("change"));
-    }
-  });
-};
-
-$("btnNinguna").onclick = () => {
-  document.querySelectorAll(".pagina-check").forEach(c => {
-    if (c.checked) {
-      c.checked = false;
-      c.dispatchEvent(new Event("change"));
-    }
-  });
-};
-
-$("btnInvertir").onclick = () => {
-  document.querySelectorAll(".pagina-check").forEach(c => {
-    c.checked = !c.checked;
+function cambiarSeleccionPaginas(modo){
+  const visor = visorPaginas();
+  if(!visor) return;
+  visor.querySelectorAll(".pagina-check").forEach(c => {
+    if(modo === "todas") c.checked = true;
+    else if(modo === "ninguna") c.checked = false;
+    else c.checked = !c.checked;
     c.dispatchEvent(new Event("change"));
   });
-};
+}
+
+$("btnTodas").onclick = () => cambiarSeleccionPaginas("todas");
+$("btnNinguna").onclick = () => cambiarSeleccionPaginas("ninguna");
+$("btnInvertir").onclick = () => cambiarSeleccionPaginas("invertir");
+$("btnTodasVB")?.addEventListener("click", () => cambiarSeleccionPaginas("todas"));
+$("btnNingunaVB")?.addEventListener("click", () => cambiarSeleccionPaginas("ninguna"));
+$("btnInvertirVB")?.addEventListener("click", () => cambiarSeleccionPaginas("invertir"));
 
 
 function normalizarRotacionPagina(pagina) {
@@ -1261,6 +1291,23 @@ function pivoteParaRotar(centro, tamano, giroDeg) {
   const rx = cos * mitad - sin * mitad;
   const ry = sin * mitad + cos * mitad;
   return { x: centro.x - rx, y: centro.y - ry };
+}
+
+function calcularPosicionSelloSuperiorDerecha(pagina, tamano, margenDerecho, margenSuperior, rotacionFinal) {
+  const {width, height} = pagina.getSize();
+  const rot = ((Number(rotacionFinal) % 360) + 360) % 360;
+  const anchoVisual = (rot === 90 || rot === 270) ? height : width;
+  const altoVisual  = (rot === 90 || rot === 270) ? width : height;
+  const centroVisualX = anchoVisual - margenDerecho - tamano / 2;
+  const centroVisualY = altoVisual - margenSuperior - tamano / 2;
+  let centro;
+  if (rot === 90) centro = { x: width - centroVisualY, y: centroVisualX };
+  else if (rot === 180) centro = { x: width - centroVisualX, y: height - centroVisualY };
+  else if (rot === 270) centro = { x: centroVisualY, y: height - centroVisualX };
+  else centro = { x: centroVisualX, y: centroVisualY };
+  const giroSello = rot === 90 ? 90 : rot === 180 ? 180 : rot === 270 ? 270 : 0;
+  const pivote = pivoteParaRotar(centro, tamano, giroSello);
+  return {x:pivote.x,y:pivote.y,giro:giroSello};
 }
 
 function calcularPosicionSello(pagina, esquina, tamano, margen, rotacionFinal) {

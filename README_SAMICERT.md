@@ -1,7 +1,7 @@
 
 ### v2.3.0 — Módulo de Visto Bueno
 - Se incorporó el usuario de Visto Bueno `rrodriguezcal@pj.gob.pe` (UID `nTTcQeP0Z1Q7hh5YTKQyuvpgvS62`).
-- El módulo carga un PDF, aplica `VB RAUL.png` en la parte superior derecha de todas las páginas y guarda una copia con sufijo `[VB]`.
+- El módulo de Visto Bueno permite cargar un PDF, revisar las páginas con las mismas herramientas de vista previa, selección, ampliación y rotación del certificador, colocar el sello de VB en las páginas seleccionadas y guardar una copia con sufijo `[VB]`.
 - El sello VB usa una posición separada del borde para no interferir con los folios inferiores.
 - Los certificadores pueden buscar una carpeta compartida y cargar directamente los archivos que terminan en `[VB].pdf`; el flujo de certificación existente continúa normalmente y el `[VB]` no se duplica en el nombre `[SF]`.
 - No se utiliza Firebase Storage para los PDF del flujo VB.
