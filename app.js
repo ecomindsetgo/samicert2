@@ -3204,9 +3204,20 @@ async function cargarPerfil(user) {
       rol:esAdmin ? "administrador" : (esMesa ? "mesa_partes" : (esVB ? "visto_bueno" : (snap.data().rol || "certificador")))
     };
 
+    // Autocorrección de nombres de perfiles antiguos.
+    // Raúl debe mostrarse siempre con su nombre completo, incluso si su
+    // documento usuarios/{uid} todavía conserva el nombre corto "Raúl".
+    if (esVB && perfilActual.nombre !== "Raúl Rodríguez Calderón") {
+      perfilActual.nombre = "Raúl Rodríguez Calderón";
+      try {
+        await setDoc(doc(db,"usuarios",user.uid), { nombre:"Raúl Rodríguez Calderón", correo:VISTO_BUENO_EMAIL, rol:"visto_bueno" }, { merge:true });
+      } catch (err) {
+        console.warn("No se pudo corregir el nombre guardado de Visto Bueno:", err);
+      }
+    }
+
     // Autocorrección: cuentas antiguas de Mesa de Partes que quedaron
-    // guardadas con el nombre por defecto "Administrador" (bug ya
-    // corregido) se actualizan aquí para mostrar "Mesa de Partes".
+    // guardadas con el nombre por defecto "Administrador".
     if (esMesa && (!perfilActual.nombre || perfilActual.nombre === "Administrador")) {
       perfilActual.nombre = "Mesa de Partes";
       try {

@@ -103,10 +103,12 @@ service cloud.firestore {
 
       // Raúl puede eliminar sus propios registros de VB mientras estén en su
       // bandeja. También se permite por correo para registros antiguos.
+      // El usuario autorizado de Visto Bueno (Raúl) puede retirar de su
+      // bandeja cualquier registro de esta colección que aún no haya sido
+      // certificado. Esto también permite gestionar registros antiguos que
+      // fueron creados antes de guardar vbUid/vbEmail.
       allow delete: if esAdministrador() ||
         (esVistoBueno() &&
-          ((resource.data.vbUid == request.auth.uid) ||
-           (resource.data.vbEmail == request.auth.token.email)) &&
           resource.data.estado in ["pendiente-certificador", "cancelado"]);
     }
 
