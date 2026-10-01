@@ -235,17 +235,6 @@
           <div class="panel-subtitle">Documentos que ya recibieron VB y están listos para que el certificador los ubique en la carpeta compartida y continúe el flujo habitual.</div>
           <div id="bandejaVBLista" class="firma-pendientes-lista"><div class="empty">Cargando…</div></div>
         </div>
-        <div class="panel" id="panelMisPendientes">
-          <div class="panel-title">Mis documentos enviados a Mesa de Partes (pendientes de firma)</div>
-          <div class="panel-subtitle">
-            Si envió un documento por error, puede cancelarlo aquí mientras siga "pendiente de firma".
-            Una vez que Mesa de Partes lo firma y registra, ya no aparece en esta lista.
-          </div>
-          <div id="misPendientesLista" class="firma-pendientes-lista">
-            <div class="empty">Cargando…</div>
-          </div>
-        </div>
-
         <div class="panel">
           <div class="panel-title">Documento PDF</div>
           <div class="panel-subtitle">El sello correspondiente al usuario que inició sesión se aplica automáticamente.</div>
@@ -319,6 +308,17 @@
 
           <div id="hashResultado" class="hash-resultado oculto"></div>
         </div>
+              <div class="panel" id="panelMisPendientes">
+          <div class="panel-title">Mis documentos enviados a Mesa de Partes (pendientes de firma)</div>
+          <div class="panel-subtitle">
+            Si envió un documento por error, puede cancelarlo aquí mientras siga "pendiente de firma".
+            Una vez que Mesa de Partes lo firma y registra, ya no aparece en esta lista.
+          </div>
+          <div id="misPendientesLista" class="firma-pendientes-lista">
+            <div class="empty">Cargando…</div>
+          </div>
+        </div>
+
       </section>
 
       
@@ -420,6 +420,15 @@
           <p>Registro centralizado de las certificaciones culminadas, con trazabilidad del certificador y de Mesa de Partes.</p>
         </div>
 
+        <div class="panel admin-etapas-toolbar">
+          <div class="history-toolbar"><div><div class="panel-title" style="margin:0">Reportes por etapa</div><div class="panel-subtitle">Seleccione qué listado desea consultar.</div></div>
+          <select id="filtroEtapaAdmin" aria-label="Filtrar reportes por etapa" class="history-select">
+            <option value="registradas">Certificaciones registradas</option>
+            <option value="vb">Documentos con Visto Bueno</option>
+            <option value="procesados">Documentos procesados por certificador</option>
+            <option value="mesa">Documentos con firma de Mesa de Partes</option>
+          </select></div>
+        </div>
         <div id="historialEtapasAdmin" class="admin-history-etapas"></div>
         <div class="panel">
           <div class="history-toolbar">
