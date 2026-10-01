@@ -747,6 +747,12 @@ async function abrirVistaAmpliada(numero) {
     $("visorModalTitulo").textContent = `Página ${numero} — vista ampliada`;
     const btnModalSeleccion = $("btnAlternarSeleccionModal");
     if (btnModalSeleccion) btnModalSeleccion.textContent = visorModalModo === "vb" ? "✓ VB" : "✓ Certificar";
+    const ayudaModal = $("visorModalAyuda");
+    if (ayudaModal) {
+      ayudaModal.textContent = visorModalModo === "vb"
+        ? "Use ‹ Anterior / Siguiente › para cambiar de página sin cerrar el visor. También puede usar ←/→. Con ✓ VB / No VB puede cambiar la selección directamente desde este visor."
+        : "Use ‹ Anterior / Siguiente › para cambiar de página sin cerrar el visor. También puede usar ←/→. Con ✓ Certificar / No certificar puede cambiar la selección directamente desde este visor.";
+    }
     $("visorModal").classList.remove("oculto");
     actualizarControlesNavegacionModal();
     actualizarBotonSeleccionModal();
