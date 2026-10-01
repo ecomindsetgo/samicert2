@@ -471,6 +471,7 @@ function actualizarResumenPaginas() {
 }
 
 async function cargarVisorPaginas(file) {
+  visorModalModo = "certificar";
   visorPaginasActivoId = "visorPaginas";
   resumenPaginasActivoId = "resumenPaginas";
   selectorPaginasActivoId = "selectorPaginas";
@@ -620,6 +621,7 @@ async function cargarVisorPaginas(file) {
 
 
 async function cargarVisorPaginasVB(file) {
+  visorModalModo = "vb";
   visorPaginasActivoId = "visorPaginasVB";
   resumenPaginasActivoId = "resumenPaginasVB";
   selectorPaginasActivoId = "selectorPaginasVB";
@@ -643,7 +645,7 @@ async function cargarVisorPaginasVB(file) {
       card.className="pagina-card seleccionada";
       card.dataset.page=String(numero);
       const controles=document.createElement("div"); controles.className="visor-controles";
-      const lupa=document.createElement("button"); lupa.type="button"; lupa.className="visor-lupa"; lupa.innerHTML=ICONOS.lupa; lupa.title="Ver página ampliada";
+      const lupa=document.createElement("button"); lupa.type="button"; lupa.className="visor-lupa"; lupa.innerHTML=ICONOS.lupa; lupa.title="Ver página ampliada"; lupa.setAttribute("aria-label",`Ampliar página ${numero}`); lupa.dataset.page=String(numero); lupa.dataset.visorLupa="vb";
       const rotar=document.createElement("button"); rotar.type="button"; rotar.className="visor-rotar"; rotar.innerHTML=ICONOS.rotar; rotar.title="Rotar página 90° — el giro se guardará en el PDF con VB";
       const meta=document.createElement("div"); meta.className="pagina-meta";
       const numeroEl=document.createElement("span"); numeroEl.className="pagina-numero"; numeroEl.textContent=`Página ${numero}`;
@@ -653,7 +655,7 @@ async function cargarVisorPaginasVB(file) {
       meta.append(numeroEl,giroEl,estadoEl);
       try {
         const pagina=await pdfVista.getPage(numero); const canvas=document.createElement("canvas");
-        lupa.addEventListener("click",e=>{e.stopPropagation(); abrirVistaAmpliada(numero);});
+        lupa.onclick=e=>{e.preventDefault(); e.stopPropagation(); abrirVistaAmpliada(numero);};
         rotar.addEventListener("click",async e=>{e.stopPropagation(); await rotarPaginaParaSalida(numero);});
         controles.append(lupa,rotar); card.append(controles,canvas,meta,check); visor.appendChild(card); canvasesPorPagina.set(numero,canvas);
         await renderMiniaturaPagina(numero);
@@ -683,6 +685,7 @@ async function cargarVisorPaginasVB(file) {
 let visorModalPaginaActual = null;
 let visorModalZoom = 1;
 let visorModalRotacionExtra = 0;
+let visorModalModo = "certificar";
 let rotacionesPagina = new Map();
 let canvasesPorPagina = new Map();
 let visorPaginasActivoId = "visorPaginas";
@@ -742,6 +745,8 @@ async function abrirVistaAmpliada(numero) {
     visorModalZoom = Math.max(0.8, Math.min(1.5, anchoDisponible / baseViewport.width));
     await renderPaginaModal(pagina);
     $("visorModalTitulo").textContent = `Página ${numero} — vista ampliada`;
+    const btnModalSeleccion = $("btnAlternarSeleccionModal");
+    if (btnModalSeleccion) btnModalSeleccion.textContent = visorModalModo === "vb" ? "✓ VB" : "✓ Certificar";
     $("visorModal").classList.remove("oculto");
     actualizarControlesNavegacionModal();
     actualizarBotonSeleccionModal();
@@ -794,7 +799,9 @@ function actualizarBotonSeleccionModal() {
   const boton = $("btnAlternarSeleccionModal");
   if (!boton || !visorModalPaginaActual) return;
   const seleccionada = paginasSeleccionadas.has(visorModalPaginaActual);
-  boton.textContent = seleccionada ? "✓ Certificar" : "○ No certificar";
+  boton.textContent = visorModalModo === "vb"
+    ? (seleccionada ? "✓ VB" : "○ No VB")
+    : (seleccionada ? "✓ Certificar" : "○ No certificar");
   boton.classList.toggle("activo", seleccionada);
 }
 
@@ -866,6 +873,7 @@ async function ajustarZoomModal() {
 
 function cerrarVistaAmpliada() {
   $("visorModal").classList.add("oculto");
+  visorModalModo = "certificar";
   visorModalPaginaActual = null;
   visorModalRotacionExtra = 0;
   document.body.style.overflow = "";
@@ -2526,8 +2534,7 @@ function fechaRegistroEnMs(r) {
 
 async function cargarHistorialEtapasAdmin() {
   if (usuarioActual?.uid !== ADMIN_UID) return;
-  const detalle = document.querySelector("#page-detalleUsuarios.active #historialDetalleUsuarios");
-  const cont = detalle || $("historialEtapasAdmin");
+  const cont = document.querySelector("#page-detalleUsuarios.active #historialDetalleUsuarios");
   if (!cont) return;
 
   try {
@@ -2536,21 +2543,6 @@ async function cargarHistorialEtapasAdmin() {
       getDocs(collection(db,"pendientesFirma")),
       getDocs(collection(db,"certificaciones"))
     ]);
-
-    if (!detalle) {
-      const certificadosUnicos = deduplicarHistorialCertificaciones(
-        certSnap.docs.map(d => ({...d.data(), id:d.id}))
-      );
-      cont.innerHTML = `
-        <div class="panel admin-completed-panel">
-          <div class="panel-title">Completados</div>
-          <div class="history-meta">
-            Certificaciones definitivas registradas: <strong>${certificadosUnicos.length}</strong>
-          </div>
-          <div class="admin-list-note">El historial definitivo se muestra sin duplicar la misma certificación.</div>
-        </div>`;
-      return;
-    }
 
     const etapa = $("filtroDetalleEtapa")?.value || "vb";
     const sets = {
@@ -2892,92 +2884,68 @@ async function cargarAdministracion() {
   estado.textContent = "";
 
   try {
-    const colecciones = ["documentosVB","pendientesFirma","certificaciones"];
-    const snaps = await Promise.all(colecciones.map(nombre => getDocs(collection(db,nombre))));
-    const registrosTodos = snaps.flatMap((snap,i) =>
-      snap.docs.map(d => ({...d.data(), id:d.id, coleccion:colecciones[i]}))
-    );
-
-    // En Administración también se evita presentar dos veces una misma
-    // certificación definitiva. Los pendientes y VB conservan cada registro
-    // porque representan etapas diferentes del flujo.
-    const certificados = deduplicarHistorialCertificaciones(
-      registrosTodos.filter(r => r.coleccion === "certificaciones")
-    );
-    const registros = [
-      ...registrosTodos.filter(r => r.coleccion !== "certificaciones"),
-      ...certificados
-    ].sort((a,b) => (b.creadoEn?.seconds || 0) - (a.creadoEn?.seconds || 0));
-
-    const completados = certificados.length;
-    const pendientes = registros.filter(r => r.coleccion !== "certificaciones").length;
+    // Administración muestra únicamente las certificaciones definitivas,
+    // sin mezclar los registros de VB ni los pendientes del certificador.
+    // Se deduplican antes de mostrarlas para que una certificación registrada
+    // una sola vez no aparezca repetida en esta bandeja.
+    const snap = await getDocs(collection(db, "certificaciones"));
+    const registros = deduplicarHistorialCertificaciones(
+      snap.docs.map(d => ({...d.data(), id:d.id, coleccion:"certificaciones"}))
+    ).sort((a,b) => fechaRegistroEnMs(b) - fechaRegistroEnMs(a));
 
     if (!registros.length) {
-      contenedor.innerHTML = '<div class="empty">No hay registros para administrar.</div>';
+      contenedor.innerHTML = '<div class="empty">No hay certificaciones registradas para administrar.</div>';
       actualizarBotonEliminarAdmin();
+      estado.textContent = "0 registro(s)";
       return;
     }
 
+    // Separar por certificador evita mezclar registros de distintos usuarios.
     const grupos = new Map();
     for (const r of registros) {
-      const grupo = `${r.coleccion}||${responsableAdmin(r)}`;
-      if (!grupos.has(grupo)) grupos.set(grupo, []);
-      grupos.get(grupo).push(r);
+      const usuario = r.certificadorNombre || r.certificadorEmail || r.firmanteNombre || r.firmanteEmail || "No indicado";
+      if (!grupos.has(usuario)) grupos.set(usuario, []);
+      grupos.get(usuario).push(r);
     }
 
-    const gruposHtml = Array.from(grupos.entries()).map(([clave, rows]) => {
-      const primera = rows[0];
-      const etapa = etiquetaEtapaAdmin(primera.coleccion);
-      const usuario = responsableAdmin(primera);
-      return `
-        <div class="admin-user-group">
-          <div class="admin-user-group-head">
-            <div>
-              <strong>${escapeHtml(etapa)}</strong>
-              <span class="admin-group-user">Usuario: ${escapeHtml(usuario)}</span>
-            </div>
-            <span class="admin-group-count">${rows.length} registro(s)</span>
-          </div>
-          <div style="overflow:auto">
-            <table class="admin-table">
-              <thead><tr>
-                <th></th><th>ID</th><th>Archivo</th><th>Fecha</th><th>Estado</th>
-              </tr></thead>
-              <tbody>
-                ${rows.map(r => `
-                  <tr>
-                    <td><input class="admin-check" type="checkbox" value="${escapeHtml(r.coleccion+"|"+r.id)}"></td>
-                    <td><small>${escapeHtml(r.id)}</small></td>
-                    <td>
-                      ${escapeHtml(archivoAdmin(r))}<br>
-                      <span style="color:#64748b">${escapeHtml((r.paginasCertificadas || []).length)} página(s)</span>
-                    </td>
-                    <td>${escapeHtml(formatoFechaRegistro(r))}</td>
-                    <td><span class="admin-stage-badge">${escapeHtml(r.estado || etapa)}</span></td>
-                  </tr>
-                `).join("")}
-              </tbody>
-            </table>
-          </div>
-        </div>`;
-    }).join("");
+    const gruposHtml = Array.from(grupos.entries()).map(([usuario, rows]) => `
+      <div class="admin-user-group">
+        <div class="admin-user-group-head">
+          <div><strong>${escapeHtml(usuario)}</strong><span class="admin-group-user">Certificador</span></div>
+          <span class="admin-group-count">${rows.length} registro(s)</span>
+        </div>
+        <div style="overflow:auto">
+          <table class="admin-table">
+            <thead><tr>
+              <th></th><th>ID</th><th>ARCHIVO</th><th>FECHA</th><th>CERTIFICADOR</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => `
+                <tr>
+                  <td><input class="admin-check" type="checkbox" value="certificaciones|${escapeHtml(r.id)}"></td>
+                  <td><small>${escapeHtml(r.id)}</small></td>
+                  <td>
+                    ${escapeHtml(archivoAdmin(r))}<br>
+                    <span style="color:#64748b">${escapeHtml((r.paginasCertificadas || []).length)} página(s)</span>
+                  </td>
+                  <td>${escapeHtml(formatoFechaRegistro(r))}</td>
+                  <td>${escapeHtml(usuario)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>`).join("");
 
     contenedor.innerHTML = `
-      <div class="admin-completed-summary">
-        <div><strong>Completados</strong><span>${completados}</span><small>certificaciones definitivas</small></div>
-        <div><strong>En proceso</strong><span>${pendientes}</span><small>VB + certificador</small></div>
-      </div>
-      <div class="admin-list-note">
-        Los registros están separados por <strong>etapa y usuario responsable</strong>. Así puede identificar exactamente
-        qué registro corresponde eliminar sin mezclar los documentos de distintos usuarios.
-      </div>
+      <div class="admin-list-note"><strong>${registros.length} registro(s)</strong></div>
       ${gruposHtml}`;
 
     contenedor.querySelectorAll(".admin-check").forEach(c =>
       c.addEventListener("change", actualizarBotonEliminarAdmin)
     );
     actualizarBotonEliminarAdmin();
-    estado.textContent = `${registros.length} registro(s) visibles · ${completados} completado(s)`;
+    estado.textContent = `${registros.length} registro(s)`;
   } catch (err) {
     console.error(err);
     contenedor.innerHTML =
