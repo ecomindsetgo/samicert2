@@ -13,7 +13,7 @@ const auth = getAuth(appFirebase);
 const db = getFirestore(appFirebase);
 
 
-const APP_VERSION = "3.0.0";
+const APP_VERSION = "3.2.0";
 
 function crearRefAuditoria() {
   return doc(collection(db, "auditoria"));
@@ -135,33 +135,24 @@ const ICONOS = {
 };
 
 
-
-
 if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 }
 
 
-
-
-
-
-
 const MESA_PARTES_EMAIL = "archivocsjsanta@pj.gob.pe";
 
 function esUsuarioMesaPartes(user = usuarioActual) {
-  return !!user && (user.email || "").toLowerCase() === MESA_PARTES_EMAIL;
+  return !!user && user.emailVerified === true && (user.email || "").toLowerCase() === MESA_PARTES_EMAIL;
 }
 
 const VISTO_BUENO_UID = "nTTcQeP0Z1Q7hh5YTKQyuvpgvS62";
 const VISTO_BUENO_EMAIL = "rrodriguezcal@pj.gob.pe";
 
 function esUsuarioVistoBueno(user = usuarioActual) {
-  return !!user && (user.uid === VISTO_BUENO_UID || (user.email || "").toLowerCase() === VISTO_BUENO_EMAIL);
+  return !!user && user.uid === VISTO_BUENO_UID && (user.email || "").toLowerCase() === VISTO_BUENO_EMAIL;
 }
-
-
 
 
 async function eliminarPdfPendiente(pendienteId, totalChunks = 0) {
@@ -232,11 +223,6 @@ let temporizadorHashResultadoMesa = null;
 const TIEMPO_MENSAJE_EXITO_MS = 12000;
 
 
-
-
-
-
-
 const TAMANO_SELLO_PT = 109;
 const MARGEN_SELLO_PT = 3;
 const ESQUINA_SELLO = "inferior-derecha";
@@ -246,12 +232,12 @@ const USUARIOS_AUTORIZADOS = {
   "wBCSJ3XfHVaUZPLmC2yJddh5RXx1": {
     nombre: "Jorge Luis Desposorio Castillo",
     correo: "jdesposorio@pj.gob.pe",
-    sello: "./sello-jorge.png"
+    hashSello: "5e956809049790362ba5a0d8b87b024766b35b7d5dd160ed9ec627e8e68c8a7f"
   },
   "4tdNYgErvlM7NB3hwP933avL3RT2": {
     nombre: "Roberto Alexander Dávila Arquiñigo",
     correo: "rdavilaaa@pj.gob.pe",
-    sello: "./sello-roberto.png"
+    hashSello: "cc3e282eb6207ee183f3b326f6b640aa48fa96ebb025160e1887d2634ae8989d"
   }
 };
 
@@ -259,22 +245,20 @@ const USUARIOS_VISTO_BUENO = {
   [VISTO_BUENO_UID]: {
     nombre: "Raúl Rodríguez Calderón",
     correo: VISTO_BUENO_EMAIL,
-    sello: "./sello-vb.png"
+    hashSello: "eca749487d0392f1e1e983fa66efad1818d01a9715fa607748b8fe0e45f095de"
   }
 };
 
 function obtenerUsuarioVB(user) {
   if (!user) return null;
   if (USUARIOS_VISTO_BUENO[user.uid]) return USUARIOS_VISTO_BUENO[user.uid];
-  const email = (user.email || "").toLowerCase();
-  return Object.values(USUARIOS_VISTO_BUENO).find(u => (u.correo || "").toLowerCase() === email) || null;
+  return null;
 }
 
 function obtenerUsuarioAutorizado(user) {
   if (!user) return null;
   if (USUARIOS_AUTORIZADOS[user.uid]) return USUARIOS_AUTORIZADOS[user.uid];
-  const email = (user.email || "").toLowerCase();
-  return Object.values(USUARIOS_AUTORIZADOS).find(u => (u.correo || "").toLowerCase() === email) || null;
+  return null;
 }
 
 function escapeHtml(value) {
@@ -516,27 +500,37 @@ function base64FromBytes(bytes) {
   return btoa(binary);
 }
 
-async function cargarSelloAutomatico() {
-  selloBytes = null;
-  const autorizado = USUARIOS_AUTORIZADOS[usuarioActual?.uid];
-
-  if (usuarioActual?.uid === ADMIN_UID || esUsuarioMesaPartes() || esUsuarioVistoBueno()) return;
-  if (!autorizado) throw new Error("Usuario no autorizado.");
-
-  try {
-    const response = await fetch(autorizado.sello, { cache:"no-store" });
-    if (!response.ok) throw new Error(`No se encontró ${autorizado.sello}`);
-    const buffer = await response.arrayBuffer();
-    selloBytes = new Uint8Array(buffer);
-
-    if (!selloBytes.length) throw new Error("El archivo del sello está vacío.");
-
-    console.log(`Sello automático cargado para ${autorizado.nombre}.`);
-  } catch (error) {
-    console.error(error);
-    selloBytes = null;
-    throw new Error(`No se pudo cargar automáticamente el sello de ${autorizado.nombre}. Verifique que ${autorizado.sello.replace("./","")} esté en la misma carpeta que index.html.`);
+async function validarSelloProtegido(bytes, perfil) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 100 || bytes.length > 2 * 1024 * 1024) {
+    throw new Error("El sello debe ser un PNG válido de hasta 2 MB.");
   }
+  const cabecera = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (!cabecera.every((n, i) => bytes[i] === n)) throw new Error("Solo se admiten sellos PNG.");
+  const sha = await calcularSHA256(bytes);
+  if (sha.toLowerCase() !== perfil.hashSello.toLowerCase()) {
+    throw new Error("El sello seleccionado no corresponde al autorizado para esta cuenta.");
+  }
+  return bytes;
+}
+
+function actualizarControlSello(tipo, disponible, mensaje = "") {
+  const id = tipo === "vb" ? "selloControlVB" : "selloControlCertificador";
+  const control = $(id);
+  const status = $(tipo === "vb" ? "selloEstadoVB" : "selloEstadoCertificador");
+  if (control) control.classList.remove("oculto");
+  if (status) status.textContent = mensaje || (disponible ? "Sello verificado y listo para usar durante esta sesión." : "Seleccione su sello institucional autorizado para continuar.");
+  if (tipo === "vb") {
+    if (btnAplicarVB) btnAplicarVB.disabled = !selloVBBytes || !archivoVBActual || paginasSeleccionadas.size === 0;
+  } else {
+    renderLista();
+  }
+}
+
+function prepararSelectorSelloCertificador() {
+  selloBytes = null;
+  const autorizado = obtenerUsuarioAutorizado(usuarioActual);
+  if (!autorizado || usuarioActual?.uid === ADMIN_UID) return;
+  actualizarControlSello("cert", false, "Seleccione su PNG institucional autorizado. Solo se requiere una vez por sesión y se utiliza exclusivamente en este navegador.");
 }
 
 function renderLista() {
@@ -1013,23 +1007,34 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowRight") cambiarPaginaModal(1);
 });
 
-async function cargarSelloVistoBueno() {
+function prepararSelectorSelloVB() {
   selloVBBytes = null;
-  if (!esUsuarioVistoBueno()) return;
   const vb = obtenerUsuarioVB(usuarioActual);
-  if (!vb?.sello) throw new Error("No se ha configurado el sello del usuario de Visto Bueno.");
+  if (!vb) return;
+  actualizarControlSello("vb", false, "Seleccione su PNG institucional autorizado. Solo se requiere una vez por sesión y se utiliza exclusivamente en este navegador.");
+}
+
+async function cargarSelloDesdeEquipo(tipo, file) {
+  if (!file || !usuarioActual) return;
+  const perfil = tipo === "vb" ? obtenerUsuarioVB(usuarioActual) : obtenerUsuarioAutorizado(usuarioActual);
+  if (!perfil) return;
   try {
-    const response = await fetch(vb.sello, { cache: "no-store" });
-    if (!response.ok) throw new Error(`No se encontró ${vb.sello}`);
-    const buffer = await response.arrayBuffer();
-    selloVBBytes = new Uint8Array(buffer);
-    if (!selloVBBytes.length) throw new Error("El archivo del sello VB está vacío.");
+    const bytes = await validarSelloProtegido(new Uint8Array(await file.arrayBuffer()), perfil);
+    if (tipo === "vb") selloVBBytes = bytes;
+    else selloBytes = bytes;
+    actualizarControlSello(tipo, true);
   } catch (error) {
-    console.error(error);
-    selloVBBytes = null;
-    throw new Error("No se pudo cargar el sello de Visto Bueno. Verifique que el archivo esté publicado junto a index.html.");
+    if (tipo === "vb") selloVBBytes = null;
+    else selloBytes = null;
+    const inputSello = $(tipo === "vb" ? "selloLocalVB" : "selloLocalCertificador");
+    if (inputSello) inputSello.value = "";
+    alert(error.message || "No se pudo verificar el sello seleccionado.");
+    actualizarControlSello(tipo, false, "El archivo no corresponde al sello autorizado. Intente nuevamente.");
   }
 }
+
+$("selloLocalVB")?.addEventListener("change", e => cargarSelloDesdeEquipo("vb", e.target.files?.[0]));
+$("selloLocalCertificador")?.addEventListener("change", e => cargarSelloDesdeEquipo("cert", e.target.files?.[0]));
 
 function nombreConSufijoVB(nombre) {
   const limpio = String(nombre || "Documento.pdf").replace(/\[VB\](?=\.pdf$)/i, "");
@@ -1172,11 +1177,13 @@ async function guardarDocumentoVB() {
     }
 
     const resultado = await guardarResultado(bytes, nombreSalidaVB, handleDestino, null);
+    confirmarDescargaSinVerificacion(resultado);
     const vbId = (crypto.randomUUID ? crypto.randomUUID() : `VB-${Date.now()}-${Math.random().toString(36).slice(2,8)}`);
     const ahoraVB = new Date();
     const registroVB = {
       archivoOriginal: archivoVBActual.name,
       archivoVBNombre: resultado.nombre || nombreSalidaVB,
+      sha256VB: await calcularSHA256(bytes),
       estado: "pendiente-certificador",
       vbUid: usuarioActual.uid,
       vbNombre: perfilActual?.nombre || usuarioActual.displayName || usuarioActual.email || "Raúl",
@@ -1226,6 +1233,10 @@ function resetearEstadoSesion() {
   pdfVista = null;
   selloBytes = null;
   selloVBBytes = null;
+  $("selloControlVB")?.classList.add("oculto");
+  $("selloControlCertificador")?.classList.add("oculto");
+  if ($("selloLocalVB")) $("selloLocalVB").value = "";
+  if ($("selloLocalCertificador")) $("selloLocalCertificador").value = "";
   archivoVBActual = null;
   if (inputPdfVB) inputPdfVB.value = "";
   if (archivoVBSeleccionado) { archivoVBSeleccionado.textContent = ""; archivoVBSeleccionado.classList.add("oculto"); }
@@ -1750,7 +1761,7 @@ async function aplicarSelloAUnPdf(file) {
     sellImage = await pdfDoc.embedPng(selloBytes);
   } catch (e) {
     console.error('Error al incrustar sello PNG:', e);
-    throw new Error('No se pudo incrustar la imagen del sello. Verifique sello-jorge.png o sello-roberto.png.');
+    throw new Error('No se pudo incrustar el sello autorizado. Verifique el PNG cargado.');
   }
 
   const fuente = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -1950,6 +1961,15 @@ async function guardarResultado(bytesSalida, nombre, handleDestino, archivoFuent
   };
 }
 
+function confirmarDescargaSinVerificacion(resultado) {
+  if (resultado.verificado) return;
+  const correcto = window.confirm(
+    `El navegador inició la descarga de ${resultado.nombre}, pero no permite comprobar que se guardó. ` +
+    "Verifique que el PDF esté completo en la carpeta prevista. ¿Confirma que lo ha comprobado para continuar con el registro?"
+  );
+  if (!correcto) throw new Error("No se confirmó el almacenamiento del archivo. El registro no se completó.");
+}
+
 function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, firebaseMensaje = "", pdfArchivado = false) {
   const box = esUsuarioMesaPartes() ? $("hashResultadoMesa") : $("hashResultado");
   if (!box) return;
@@ -1963,13 +1983,13 @@ function mostrarResultadoGuardado(resultado, nombre, idFinal, firebaseOk, fireba
   box.style.borderLeftColor = "#16823a";
   box.style.background = "#f6fbf8";
   box.innerHTML = `
-    <div class="hash-titulo" style="color:#16823a">✓ PDF certificado guardado correctamente</div>
+    <div class="hash-titulo" style="color:#16823a">✓ PDF firmado procesado</div>
     <div style="margin-top:7px;font-size:12px;line-height:1.5">
       <strong>Archivo:</strong> ${nombreSeguro}<br>
       <strong>ID:</strong> ${escapeHtml(idFinal)}<br>
       <strong>Tamaño:</strong> ${Number(resultado.tamano || 0).toLocaleString()} bytes<br>
        <strong>SHA-256:</strong> <span style="word-break:break-all">${escapeHtml(resultado.sha256 || "")}</span><br>
-      ${resultado.verificado ? "✓ Se verificó el tamaño y la huella del archivo después de guardarlo." : ""}
+      ${resultado.verificado ? "✓ Archivo guardado y cotejado con su huella SHA-256." : "⚠ Descarga iniciada: el navegador no confirma su almacenamiento. Compruebe que el archivo esté en la carpeta prevista antes de enviarlo."}
     </div>
     ${estadoFirebase}`;
 
@@ -2051,6 +2071,7 @@ btnAplicar.addEventListener("click", async () => {
     const resultadoGuardado = await guardarResultado(
       resultado.bytesSalida, nombreProvisional, handleDestino, null
     );
+    confirmarDescargaSinVerificacion(resultadoGuardado);
 
     const pendiente = {
       id: pendienteId,
@@ -2070,7 +2091,7 @@ btnAplicar.addEventListener("click", async () => {
       certificadorNombre: perfilActual?.nombre || usuarioActual.displayName || usuarioActual.email || "Usuario autorizado",
       certificadorEmail: usuarioActual.email || "",
       zonaHoraria: "America/Lima",
-      selloArchivo: obtenerUsuarioAutorizado(usuarioActual)?.sello.replace("./", "") || "",
+      selloArchivo: "sello-institucional-restringido",
       pdfArchivado: false,
       pdfChunksTotal: 0,
       pdfBytesTotal: resultado.bytesSalida.length,
@@ -2083,9 +2104,13 @@ btnAplicar.addEventListener("click", async () => {
     try {
       const vbPendientes = await getDocs(collection(db, "documentosVB"));
       const nombreBase = String(resultado.meta.archivoOriginal || "").replace(/\[VB\](?=\.pdf$)/i, "").toLowerCase();
+      const hashPdfOrigen = String(hashOrigenActual || "").toLowerCase();
       const vbMatch = vbPendientes.docs.find(d => {
         const r = d.data();
-        return r.estado === "pendiente-certificador" && String(r.archivoOriginal || "").replace(/\[VB\](?=\.pdf$)/i, "").toLowerCase() === nombreBase;
+        return r.estado === "pendiente-certificador" && (
+          r.sha256VB ? r.sha256VB === hashPdfOrigen
+            : String(r.archivoOriginal || "").replace(/\[VB\](?=\.pdf$)/i, "").toLowerCase() === nombreBase
+        );
       });
       if (vbMatch) vbMatchRef = doc(db, "documentosVB", vbMatch.id);
     } catch (eVB) {
@@ -2443,6 +2468,7 @@ btnRegistrarFirmado?.addEventListener("click", async () => {
     const resultadoGuardado = await guardarResultado(
       bytesFirmados.slice(), nombreFinal, handleDestino, null
     );
+    confirmarDescargaSinVerificacion(resultadoGuardado);
 
     const registro = {
       id: pendienteFirmaActual.id,
@@ -3304,9 +3330,7 @@ function mostrarPagina(nombre) {
   if (nombre === "detalleUsuarios") cargarHistorialEtapasAdmin();
   if (nombre === "administracion") { cargarAdministracion(); cargarAuditoriaAdmin(); }
   if (nombre === "vistoBueno") {
-    cargarSelloVistoBueno().then(() => cargarBandejaVB()).catch(err => {
-      mostrarEstadoVB(err.message || "No se pudo cargar el sello de Visto Bueno.", "error");
-    });
+    if (!selloVBBytes) actualizarControlSello("vb", false);
     cargarBandejaVB();
   }
   if (nombre === "firmar") {
@@ -3415,7 +3439,7 @@ async function cargarPerfil(user) {
     perfilActual = {
       ...snap.data(),
       uid:user.uid,
-      rol:esAdmin ? "administrador" : (esMesa ? "mesa_partes" : (esVB ? "visto_bueno" : (snap.data().rol || "certificador")))
+      rol:esAdmin ? "administrador" : (esMesa ? "mesa_partes" : (esVB ? "visto_bueno" : "certificador"))
     };
 
     if (esVB && perfilActual.nombre !== "Raúl Rodríguez Calderón") {
@@ -3519,7 +3543,7 @@ passwordForm.addEventListener("submit", async e => {
     mostrarMensajePassword("success", "Contraseña actualizada correctamente. La nueva contraseña ya está activa.");
 
   } catch (error) {
-    console.error("ERROR CAMBIO DE CONTRASEÑA:", error);
+    console.error("No se pudo actualizar la contraseña:", error?.code || "desconocido");
     mostrarMensajePassword("error", traducirErrorPassword(error));
   } finally {
     btnGuardarPassword.disabled = false;
@@ -3571,9 +3595,12 @@ onAuthStateChanged(auth,async user => {
   }
 
   try {
+    if ((user.email || "").toLowerCase() === MESA_PARTES_EMAIL && user.emailVerified !== true) {
+      throw new Error("La cuenta de Mesa de Partes debe verificar su correo electrónico en Firebase Authentication antes de ingresar.");
+    }
     await cargarPerfil(user);
-    await cargarSelloAutomatico();
-    await cargarSelloVistoBueno();
+    prepararSelectorSelloCertificador();
+    prepararSelectorSelloVB();
 
     loginScreen.classList.add("oculto");
     appScreen.classList.remove("oculto");

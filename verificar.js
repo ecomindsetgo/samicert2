@@ -133,9 +133,9 @@ $("inputPdf").addEventListener("change", async e => {
 
     if (hash === esperado) {
       caja.className = "aviso aviso-ok";
-      caja.innerHTML = "<strong>✓ El archivo es íntegro y auténtico</strong>" +
+      caja.innerHTML = "<strong>✓ La huella SHA-256 coincide con el registro</strong>" +
         "Es exactamente el PDF que se certificó con el código " + escapeHtml(registroActual.id) +
-        ". No ha sido modificado desde entonces.";
+        ". Esta comparación no valida por sí sola la firma digital ni el estado del certificado del firmante.";
     } else {
       caja.className = "aviso aviso-error";
       caja.innerHTML = "<strong>✗ El archivo NO coincide con esta certificación</strong>" +

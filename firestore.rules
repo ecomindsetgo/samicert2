@@ -3,27 +3,97 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function autenticado() { return request.auth != null; }
     function esAdministrador() { return autenticado() && request.auth.uid == "OCsKdrDfB6h0Ey5RLjiWnvoOWqs1"; }
-    function esCertificador() { return autenticado() && (request.auth.uid == "wBCSJ3XfHVaUZPLmC2yJddh5RXx1" || request.auth.uid == "4tdNYgErvlM7NB3hwP933avL3RT2" || request.auth.token.email == "jdesposorio@pj.gob.pe" || request.auth.token.email == "rdavilaaa@pj.gob.pe"); }
-    function esMesaPartes() { return autenticado() && request.auth.token.email == "archivocsjsanta@pj.gob.pe"; }
-    function esVistoBueno() { return autenticado() && (request.auth.uid == "nTTcQeP0Z1Q7hh5YTKQyuvpgvS62" || request.auth.token.email == "rrodriguezcal@pj.gob.pe"); }
+    function esCertificador() {
+      return autenticado() && request.auth.uid in ["wBCSJ3XfHVaUZPLmC2yJddh5RXx1", "4tdNYgErvlM7NB3hwP933avL3RT2"];
+    }
+    function esMesaPartes() {
+      return autenticado() && request.auth.token.email == "archivocsjsanta@pj.gob.pe" && request.auth.token.email_verified == true;
+    }
+    function esVistoBueno() { return autenticado() && request.auth.uid == "nTTcQeP0Z1Q7hh5YTKQyuvpgvS62"; }
     function esUsuarioSistema() { return esAdministrador() || esCertificador() || esMesaPartes() || esVistoBueno(); }
-    function clavesPublicasPermitidas() {
+    function rolActual() {
+      return esAdministrador() ? "administrador" : esMesaPartes() ? "mesa_partes" : esVistoBueno() ? "visto_bueno" : "certificador";
+    }
+    function shaValido(sha) { return sha is string && sha.matches('^[a-f0-9]{64}$'); }
+    function camposPublicos() {
       return request.resource.data.keys().hasOnly([
-        "id","fecha","hora","zonaHoraria","archivoCertificadoNombre","paginasCertificadas","totalPaginas","sha256","certificadorNombre","firmanteNombre","firmaDigital","firmaDigitalTipo","validacionFirmaEstructural","esRecertificacion","motivoRecertificacion","certificacionesPrevias","estado","versionSistema","publicadoEn"
+        "id", "fecha", "hora", "zonaHoraria", "archivoCertificadoNombre", "paginasCertificadas", "totalPaginas", "sha256", "certificadorNombre", "firmanteNombre", "firmaDigital", "firmaDigitalTipo", "validacionFirmaEstructural", "esRecertificacion", "motivoRecertificacion", "certificacionesPrevias", "estado", "versionSistema", "publicadoEn"
       ]);
     }
 
     match /usuarios/{uid} {
       allow read: if esAdministrador() || (esUsuarioSistema() && request.auth.uid == uid);
-      allow create, update: if esUsuarioSistema() && request.auth.uid == uid;
+      allow create: if esUsuarioSistema() && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.correo == request.auth.token.email
+        && request.resource.data.rol == rolActual()
+        && request.resource.data.creadoEn == request.time
+        && request.resource.data.keys().hasOnly(["uid", "nombre", "correo", "rol", "creadoEn"]);
+      allow update: if esUsuarioSistema() && request.auth.uid == uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.correo == request.auth.token.email
+        && request.resource.data.rol == rolActual()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["nombre", "correo", "rol"]);
       allow delete: if false;
+    }
+
+    match /documentosVB/{documentoId} {
+      allow read: if esAdministrador() || esCertificador() || esVistoBueno();
+      allow create: if esVistoBueno()
+        && request.resource.data.vbUid == request.auth.uid
+        && request.resource.data.vbEmail == request.auth.token.email
+        && request.resource.data.estado == "pendiente-certificador"
+        && request.resource.data.creadoEn == request.time
+        && shaValido(request.resource.data.sha256VB);
+      allow update: if esAdministrador()
+        || (esCertificador() && resource.data.estado == "pendiente-certificador"
+          && request.resource.data.estado == "procesado-certificador"
+          && request.resource.data.certificadorUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "estado", "certificadorUid", "certificadorNombre", "certificadorEmail", "pendienteFirmaId", "atendidoEn", "versionSistema"
+          ])
+          && existsAfter(/databases/$(database)/documents/pendientesFirma/$(request.resource.data.pendienteFirmaId))
+          && getAfter(/databases/$(database)/documents/pendientesFirma/$(request.resource.data.pendienteFirmaId)).data.certificadorUid == request.auth.uid)
+        || (esVistoBueno() && resource.data.estado == "pendiente-certificador"
+          && (resource.data.vbUid == request.auth.uid || (resource.data.vbEmail == request.auth.token.email && request.auth.token.email_verified == true))
+          && request.resource.data.estado == "cancelado"
+          && request.resource.data.canceladoPor == request.auth.uid
+          && request.resource.data.motivoCancelacion is string
+          && request.resource.data.motivoCancelacion.size() >= 8
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "estado", "motivoCancelacion", "canceladoPor", "canceladoNombre", "canceladoEmail", "canceladoEn", "versionSistema"
+          ]));
+      allow delete: if esAdministrador();
     }
 
     match /pendientesFirma/{pendienteId} {
       allow read: if esAdministrador() || esCertificador() || esMesaPartes();
-      allow create: if esCertificador() && request.resource.data.certificadorUid == request.auth.uid && request.resource.data.estado == "pendiente-firma";
-      allow update: if (esMesaPartes() && resource.data.estado == "pendiente-firma" && request.resource.data.estado == "pendiente-firma") || (esCertificador() && resource.data.certificadorUid == request.auth.uid && resource.data.estado == "pendiente-firma" && request.resource.data.estado == "cancelado-certificador" && request.resource.data.canceladoPorUid == request.auth.uid);
-      allow delete: if esAdministrador() || (esMesaPartes() && existsAfter(/databases/$(database)/documents/certificaciones/$(pendienteId)) && getAfter(/databases/$(database)/documents/certificaciones/$(pendienteId)).data.firmanteUid == request.auth.uid && getAfter(/databases/$(database)/documents/certificaciones/$(pendienteId)).data.estado == "certificado");
+      allow create: if esCertificador()
+        && request.resource.data.id == pendienteId
+        && request.resource.data.certificadorUid == request.auth.uid
+        && request.resource.data.estado == "pendiente-firma"
+        && shaValido(request.resource.data.sha256PreFirma)
+        && request.resource.data.totalPaginas is int
+        && request.resource.data.totalPaginas > 0
+        && request.resource.data.paginasCertificadas is list
+        && request.resource.data.paginasCertificadas.size() > 0
+        && request.resource.data.paginasCertificadas.size() <= request.resource.data.totalPaginas
+        && request.resource.data.creadoEn == request.time;
+      allow update: if esCertificador()
+        && resource.data.certificadorUid == request.auth.uid
+        && resource.data.estado == "pendiente-firma"
+        && request.resource.data.estado == "cancelado-certificador"
+        && request.resource.data.canceladoPorUid == request.auth.uid
+        && request.resource.data.motivoCancelacion is string
+        && request.resource.data.motivoCancelacion.size() >= 8
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "estado", "motivoCancelacion", "canceladoPorUid", "canceladoPorNombre", "canceladoEn", "versionSistema"
+        ]);
+      allow delete: if esAdministrador()
+        || (esMesaPartes()
+          && existsAfter(/databases/$(database)/documents/certificaciones/$(pendienteId))
+          && getAfter(/databases/$(database)/documents/certificaciones/$(pendienteId)).data.firmanteUid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/certificaciones/$(pendienteId)).data.estado == "certificado");
       match /pdfChunks/{chunkId} {
         allow read: if esAdministrador() || esCertificador() || esMesaPartes();
         allow create, update: if false;
@@ -31,16 +101,29 @@ service cloud.firestore {
       }
     }
 
-    match /documentosVB/{documentoId} {
-      allow read: if esAdministrador() || esCertificador() || esVistoBueno();
-      allow create: if esVistoBueno() && request.resource.data.vbUid == request.auth.uid && request.resource.data.estado == "pendiente-certificador";
-      allow update: if esAdministrador() || (esCertificador() && resource.data.estado == "pendiente-certificador" && request.resource.data.estado == "procesado-certificador" && request.resource.data.certificadorUid == request.auth.uid) || (esVistoBueno() && (resource.data.vbUid == request.auth.uid || resource.data.vbEmail == request.auth.token.email || (!resource.data.vbUid && !resource.data.vbEmail && resource.data.estado == "pendiente-certificador")));
-      allow delete: if esAdministrador();
-    }
-
     match /certificaciones/{certificacionId} {
       allow get, list: if esAdministrador() || esCertificador() || esMesaPartes();
-      allow create: if esMesaPartes() && exists(/databases/$(database)/documents/pendientesFirma/$(certificacionId)) && request.resource.data.certificadorUid == get(/databases/$(database)/documents/pendientesFirma/$(certificacionId)).data.certificadorUid && request.resource.data.firmanteUid == request.auth.uid && request.resource.data.estado == "certificado" && request.resource.data.validacionFirmaEstructural == true && request.resource.data.sha256Final is string && request.resource.data.sha256Final.size() == 64;
+      allow create: if esMesaPartes()
+        && exists(/databases/$(database)/documents/pendientesFirma/$(certificacionId))
+        && !existsAfter(/databases/$(database)/documents/pendientesFirma/$(certificacionId))
+        && request.resource.data.id == certificacionId
+        && request.resource.data.certificadorUid == get(/databases/$(database)/documents/pendientesFirma/$(certificacionId)).data.certificadorUid
+        && request.resource.data.sha256PreFirma == get(/databases/$(database)/documents/pendientesFirma/$(certificacionId)).data.sha256PreFirma
+        && request.resource.data.archivoOriginal == get(/databases/$(database)/documents/pendientesFirma/$(certificacionId)).data.archivoOriginal
+        && request.resource.data.totalPaginas == get(/databases/$(database)/documents/pendientesFirma/$(certificacionId)).data.totalPaginas
+        && request.resource.data.paginasCertificadas == get(/databases/$(database)/documents/pendientesFirma/$(certificacionId)).data.paginasCertificadas
+        && request.resource.data.firmanteUid == request.auth.uid
+        && request.resource.data.firmanteEmail == request.auth.token.email
+        && request.resource.data.estado == "certificado"
+        && request.resource.data.firmadoPorMesaDePartes == true
+        && request.resource.data.firmaDigital == true
+        && request.resource.data.validacionFirmaEstructural == true
+        && shaValido(request.resource.data.sha256Final)
+        && request.resource.data.sha256 == request.resource.data.sha256Final
+        && request.resource.data.firmaByteRange is list
+        && request.resource.data.firmaByteRange.size() == 4
+        && request.resource.data.firmadoEnSAMICERT == request.time
+        && request.resource.data.creadoEn == request.time;
       allow update: if false;
       allow delete: if esAdministrador();
       match /pdfChunks/{chunkId} {
@@ -53,14 +136,30 @@ service cloud.firestore {
     match /certificacionesPublicas/{certificacionId} {
       allow get: if true;
       allow list: if false;
-      allow create: if clavesPublicasPermitidas() && (esAdministrador() || (esMesaPartes() && existsAfter(/databases/$(database)/documents/certificaciones/$(certificacionId)) && request.resource.data.id == certificacionId && request.resource.data.estado == "certificado" && request.resource.data.sha256 == getAfter(/databases/$(database)/documents/certificaciones/$(certificacionId)).data.sha256Final));
-      allow update: if esAdministrador() && clavesPublicasPermitidas();
+      allow create: if camposPublicos() && (esAdministrador()
+        || (esMesaPartes()
+          && existsAfter(/databases/$(database)/documents/certificaciones/$(certificacionId))
+          && request.resource.data.id == certificacionId
+          && request.resource.data.estado == "certificado"
+          && request.resource.data.firmaDigital == true
+          && request.resource.data.sha256 == getAfter(/databases/$(database)/documents/certificaciones/$(certificacionId)).data.sha256Final));
+      allow update: if esAdministrador() && camposPublicos();
       allow delete: if esAdministrador();
     }
 
     match /auditoria/{eventoId} {
       allow read: if esAdministrador();
-      allow create: if esUsuarioSistema() && request.resource.data.actorUid == request.auth.uid && request.resource.data.tipo is string && request.resource.data.entidad is string && request.resource.data.entidadId is string;
+      allow create: if esUsuarioSistema()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actorEmail == request.auth.token.email
+        && request.resource.data.actorRol == rolActual()
+        && request.resource.data.tipo is string
+        && request.resource.data.tipo.size() > 0
+        && request.resource.data.tipo.size() <= 80
+        && request.resource.data.entidad is string
+        && request.resource.data.entidadId is string
+        && request.resource.data.detalle is map
+        && request.resource.data.creadoEn == request.time;
       allow update, delete: if false;
     }
 
@@ -68,7 +167,6 @@ service cloud.firestore {
       allow read, create: if esAdministrador();
       allow update, delete: if false;
     }
-
     match /{document=**} { allow read, write: if false; }
   }
 }

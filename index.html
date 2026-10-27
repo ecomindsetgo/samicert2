@@ -35,7 +35,7 @@
       </div>
     </div>
     <h2>Acceso al sistema</h2>
-    <p>Ingresa con una cuenta autorizada según su función: certificador, Mesa de Partes o administrador.</p>
+    <p>Ingrese con una cuenta autorizada para Visto Bueno, certificación, Mesa de Partes o administración.</p>
     <form id="loginForm">
       <div class="field">
         <label for="loginEmail">Correo electrónico</label>
@@ -77,9 +77,9 @@
     </nav>
 
     <div class="sidebar-footer">
-      SAMICERT v3.0.0<br>
+      SAMICERT v3.2.0<br>
       Creado por Alfredo Raúl Cruzado Palacios<br>
-      © 2026 Poder Judicial del Perú
+      Uso institucional · 2026
     </div>
   </aside>
   <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
@@ -116,7 +116,7 @@
           <h2>Bienvenido al sistema SAMICERT</h2>
           <p>Seleccione una opción del menú para comenzar.</p>
           <div class="info-strip">
-            <strong>Certificación automática:</strong> el sello se asigna automáticamente según el usuario que inició sesión. El sistema no permite cambiarlo desde la pantalla.
+            <strong>Sellos institucionales:</strong> el sistema carga el sello desde almacenamiento restringido. Si el servicio no está configurado, solicita seleccionar el archivo autorizado en este equipo.
           </div>
         </div>
 
@@ -188,6 +188,14 @@
           <p>Módulo para cargar el PDF de copias, revisar sus páginas y colocar el Visto Bueno antes de enviarlo al flujo de certificación.</p>
         </div>
 
+        <div class="panel sello-control oculto" id="selloControlVB">
+          <div class="panel-title">Sello institucional protegido</div>
+          <p id="selloEstadoVB">Seleccione su sello PNG autorizado al iniciar la sesión.</p>
+          <label class="sello-selector">Seleccionar sello de Visto Bueno (PNG)
+            <input type="file" id="selloLocalVB" accept="image/png,.png">
+          </label>
+          <p class="sello-ayuda">El sistema verifica la huella SHA-256 de su sello. Se usa únicamente en esta sesión y no se envía a Firebase ni se publica en el sitio. Mantenga el PNG en una carpeta privada de su equipo.</p>
+        </div>
         <div class="panel" id="panelMisRegistrosVB">
           <div class="panel-title">Mis documentos con Visto Bueno</div>
           <div class="panel-subtitle">Revise los VB que ha registrado. Puede cancelar el VB o eliminar el registro si fue aplicado por error.</div>
@@ -237,6 +245,14 @@
           <p>Seleccione el PDF y las páginas que serán certificadas. La certificación se registra recién después de importar el PDF firmado digitalmente.</p>
         </div>
 
+        <div class="panel sello-control oculto" id="selloControlCertificador">
+          <div class="panel-title">Sello institucional protegido</div>
+          <p id="selloEstadoCertificador">Seleccione su sello PNG autorizado al iniciar la sesión.</p>
+          <label class="sello-selector">Seleccionar sello de certificador (PNG)
+            <input type="file" id="selloLocalCertificador" accept="image/png,.png">
+          </label>
+          <p class="sello-ayuda">El sistema verifica la huella SHA-256 de su sello. Se usa únicamente en esta sesión y no se envía a Firebase ni se publica en el sitio. Mantenga el PNG en una carpeta privada de su equipo.</p>
+        </div>
         <div class="panel" id="panelBandejaVB">
           <div class="panel-title">Bandeja de documentos con Visto Bueno</div>
           <div class="panel-subtitle">Documentos que ya recibieron VB y están listos para que el certificador los ubique en la carpeta compartida y continúe el flujo habitual.</div>
@@ -244,7 +260,7 @@
         </div>
         <div class="panel">
           <div class="panel-title">Documento PDF</div>
-          <div class="panel-subtitle">El sello correspondiente al usuario que inició sesión se aplica automáticamente.</div>
+          <div class="panel-subtitle">El sello PNG previamente seleccionado y verificado para su cuenta se aplica al documento. Se selecciona una sola vez por sesión.</div>
 
           <div class="drop" id="drop">
             <div class="icono"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8L14.5 3Z"/><path d="M14.5 3v4.5A1.5 1.5 0 0 0 16 9h4.5"/><path d="M9 13h6M9 16.5h6M9 9.5h2"/></svg></div>
