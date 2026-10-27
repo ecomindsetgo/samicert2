@@ -77,7 +77,7 @@
     </nav>
 
     <div class="sidebar-footer">
-      SAMICERT v3.2.1<br>
+      SAMICERT v3.3.0<br>
       Creado por Alfredo Raúl Cruzado Palacios<br>
       Uso institucional · 2026
     </div>
@@ -474,69 +474,89 @@
 
       
       
-      <section class="page" id="page-detalleUsuarios"><div class="section-head"><h2>Detalle por usuario</h2><p>Consulte los documentos con Visto Bueno, procesados por certificador y firmados por Mesa de Partes.</p></div><div class="panel"><label for="filtroDetalleEtapa"><strong>Etapa del documento</strong></label><select id="filtroDetalleEtapa" class="history-select"><option value="vb">Documentos con Visto Bueno</option><option value="procesados">Documentos procesados por certificador</option><option value="mesa">Documentos con firma de Mesa de Partes</option></select></div><div id="historialDetalleUsuarios" class="admin-history-etapas"></div></section>
+      <section class="page" id="page-detalleUsuarios">
+        <div class="section-head admin-heading">
+          <div><h2>Detalle por usuario</h2><p>Seguimiento de los documentos por responsable y etapa del proceso.</p></div>
+          <button type="button" class="btn-small" id="btnActualizarDetalle">Actualizar registros</button>
+        </div>
+        <div class="admin-metrics" id="detalleIndicadores" aria-live="polite">
+          <div class="admin-metric"><span>Visto Bueno</span><strong id="detalleKpiVB">—</strong><small>Registros de preparación</small></div>
+          <div class="admin-metric"><span>Certificación</span><strong id="detalleKpiCert">—</strong><small>Pendientes y finalizados</small></div>
+          <div class="admin-metric"><span>Firma registrada</span><strong id="detalleKpiMesa">—</strong><small>Documentos completados</small></div>
+        </div>
+        <div class="panel admin-work-panel">
+          <div class="admin-panel-heading"><div><h3>Consultar actividad</h3><p>Seleccione una etapa y filtre por nombre, archivo, identificación o fecha.</p></div></div>
+          <div class="admin-filter-grid">
+            <div class="admin-filter-field admin-filter-stage"><label for="filtroDetalleEtapa">Etapa</label><select id="filtroDetalleEtapa" class="history-select"><option value="vb">Visto Bueno</option><option value="procesados">Certificación</option><option value="mesa">Firma registrada</option></select></div>
+            <div class="admin-filter-field"><label for="detalleBuscar">Buscar documento o usuario</label><input id="detalleBuscar" type="search" placeholder="Nombre, archivo o código" autocomplete="off"></div>
+            <div class="admin-filter-field"><label for="detalleUsuario">Responsable</label><select id="detalleUsuario"><option value="">Todos los responsables</option></select></div>
+            <div class="admin-filter-field"><label for="detalleDesde">Desde</label><input id="detalleDesde" type="date"></div>
+            <div class="admin-filter-field"><label for="detalleHasta">Hasta</label><input id="detalleHasta" type="date"></div>
+            <div class="admin-filter-actions"><button type="button" id="btnLimpiarDetalle" class="btn-small">Limpiar filtros</button></div>
+          </div>
+          <div class="admin-list-heading"><div><strong id="detalleResumen">Selecciona una etapa para consultar</strong><small id="detalleSubtitulo">Los datos se toman de Firestore.</small></div><span class="admin-list-counter" id="detalleContador">—</span></div>
+          <div id="historialDetalleUsuarios" class="admin-history-etapas" aria-live="polite"><div class="empty">Cargando información…</div></div>
+          <div class="admin-pagination oculto" id="detallePaginacion"><button type="button" class="btn-small" id="btnDetalleAnterior">Anterior</button><span id="detallePaginaTexto">Página 1 de 1</span><button type="button" class="btn-small" id="btnDetalleSiguiente">Siguiente</button></div>
+        </div>
+      </section>
 
       <section class="page" id="page-administracion">
-        <div class="section-head">
-          <h2>Administración de SAMICERT</h2>
-          <p>Funciones reservadas exclusivamente al usuario administrador.</p>
+        <div class="section-head admin-heading">
+          <div><h2>Administración</h2><p>Control, trazabilidad y mantenimiento del registro institucional.</p></div>
+          <span class="admin-view-tag">Acceso restringido</span>
+        </div>
+        <div class="admin-metrics" aria-live="polite">
+          <div class="admin-metric"><span>Certificaciones finales</span><strong id="adminKpiCert">—</strong><small>En el registro operativo</small></div>
+          <div class="admin-metric"><span>Recertificaciones</span><strong id="adminKpiRecert">—</strong><small>Incluidas en el total</small></div>
+          <div class="admin-metric"><span>Última certificación</span><strong class="admin-kpi-date" id="adminKpiUltima">—</strong><small>Fecha de registro en SAMICERT</small></div>
+        </div>
+        <div class="admin-tabs" role="tablist" aria-label="Secciones de administración">
+          <button type="button" class="admin-tab is-active" role="tab" aria-selected="true" aria-controls="admin-panel-supervision" data-admin-tab="supervision">Supervisión</button>
+          <button type="button" class="admin-tab" role="tab" aria-selected="false" aria-controls="admin-panel-respaldo" data-admin-tab="respaldo">Respaldos</button>
+          <button type="button" class="admin-tab" role="tab" aria-selected="false" aria-controls="admin-panel-mantenimiento" data-admin-tab="mantenimiento">Mantenimiento</button>
         </div>
 
-        <div class="panel">
-          <div class="panel-title">Respaldo de registros</div>
-          <div class="panel-subtitle">
-            Genera un respaldo JSON de las certificaciones registradas en Firestore. Incluye metadatos, SHA-256,
-            certificador, fecha, hora y páginas certificadas.
+        <div class="admin-tab-panel" id="admin-panel-supervision" role="tabpanel">
+          <div class="panel admin-work-panel">
+            <div class="admin-panel-heading"><div><h3>Consulta pública</h3><p>Actualiza el índice de verificación que utilizan los códigos QR.</p></div></div>
+            <div class="admin-inline-notice">Esta operación sincroniza los datos públicos de las certificaciones. No altera los PDF firmados.</div>
+            <div class="admin-toolbar"><button class="btn-green" id="btnSincronizarPublicas">Sincronizar consulta pública</button><span class="admin-status" id="syncPublicaStatus" role="status"></span></div>
           </div>
-          <div class="backup-card">
-            <strong>Importante:</strong> la versión actual de SAMICERT no almacena los PDF certificados dentro de Firebase;
-            los archivos se descargan en el equipo del certificador. Por ello, este respaldo protege el registro de certificaciones,
-            no los archivos PDF.
-          </div>
-          <div class="admin-toolbar">
-            <button class="btn-green btn-icon" id="btnCrearBackup"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13m0 0 4-4m-4 4-4-4"/><path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17"/></svg> Generar respaldo</button>
-            <span class="admin-status" id="backupStatus"></span>
+          <div class="panel admin-work-panel">
+            <div class="admin-panel-heading"><div><h3>Bitácora de acciones</h3><p>Eventos registrados por las cuentas autorizadas. Los detalles técnicos se pueden desplegar.</p></div><button class="btn-small" id="btnActualizarAuditoria">Actualizar</button></div>
+            <div class="admin-filter-grid admin-log-filters"><div class="admin-filter-field"><label for="auditoriaBuscar">Buscar evento o usuario</label><input type="search" id="auditoriaBuscar" placeholder="Acción, responsable o documento" autocomplete="off"></div><div class="admin-filter-field"><label for="auditoriaTipo">Acción</label><select id="auditoriaTipo"><option value="">Todas las acciones</option></select></div><div class="admin-filter-actions"><button type="button" class="btn-small" id="btnLimpiarAuditoria">Limpiar</button></div></div>
+            <div class="admin-list-heading"><div><strong id="auditoriaResumen">Bitácora institucional</strong><small>Los eventos son registros de actividad, no validaciones criptográficas.</small></div></div>
+            <div id="auditoriaLista" class="audit-list" aria-live="polite"><div class="empty">La bitácora se cargará al abrir Administración.</div></div>
+            <div class="admin-pagination oculto" id="auditoriaPaginacion"><button type="button" class="btn-small" id="btnAuditoriaAnterior">Anterior</button><span id="auditoriaPaginaTexto">Página 1 de 1</span><button type="button" class="btn-small" id="btnAuditoriaSiguiente">Siguiente</button></div>
           </div>
         </div>
 
-        <div class="panel">
-          <div class="panel-title">Consulta pública y trazabilidad</div>
-          <div class="panel-subtitle">
-            Sincroniza las certificaciones históricas con el índice público mínimo usado por los códigos QR y permite revisar la bitácora de acciones críticas.
+        <div class="admin-tab-panel oculto" id="admin-panel-respaldo" role="tabpanel">
+          <div class="panel admin-work-panel">
+            <div class="admin-panel-heading"><div><h3>Respaldo de datos</h3><p>Descarga en JSON los registros administrativos y sus metadatos almacenados en Firestore.</p></div></div>
+            <div class="admin-inline-notice"><strong>Alcance:</strong> incluye registros, huellas SHA-256 y bitácora. <strong>No incluye los archivos PDF guardados en los equipos o carpetas institucionales.</strong></div>
+            <div class="admin-toolbar"><button class="btn-green btn-icon" id="btnCrearBackup">Descargar respaldo JSON</button><span class="admin-status" id="backupStatus" role="status"></span></div>
+            <p class="admin-help">Guarda el respaldo en una ubicación institucional autorizada. El archivo puede contener información personal y no debe publicarse en GitHub.</p>
           </div>
-          <div class="admin-toolbar">
-            <button class="btn-green" id="btnSincronizarPublicas">Sincronizar consulta pública</button>
-            <button class="btn-small" id="btnActualizarAuditoria">Actualizar bitácora</button>
-            <span class="admin-status" id="syncPublicaStatus"></span>
-          </div>
-          <div id="auditoriaLista" class="audit-list"><div class="empty">La bitácora se cargará al abrir Administración.</div></div>
         </div>
 
-        <div class="panel">
-          <div class="panel-title admin-danger">Archivo controlado de registros de prueba o error</div>
-          <div class="panel-subtitle">
-            Seleccione únicamente registros que correspondan a pruebas o errores. Antes de retirarlos del registro operativo, SAMICERT conservará una copia íntegra en el archivo administrativo y registrará la acción en la bitácora.
-          </div>
-          <div class="admin-note">
-            <strong>Control de trazabilidad:</strong> el motivo es obligatorio. La copia archivada y el evento de auditoría no pueden editarse ni borrarse desde la aplicación.
-          </div>
-          <div class="field admin-reason-field">
-            <label for="adminMotivoEliminacion">Motivo del retiro</label>
-            <textarea id="adminMotivoEliminacion" rows="3" minlength="10" placeholder="Ejemplo: registro generado durante pruebas de implementación, sin valor documental."></textarea>
-          </div>
-          <div class="admin-toolbar">
-            <button class="btn-small" id="btnSeleccionarTodosAdmin">Seleccionar todos</button>
-            <button class="btn-small" id="btnDeseleccionarTodosAdmin">Deseleccionar todos</button>
-            <button class="btn-danger" id="btnEliminarSeleccionados" disabled>Archivar y retirar seleccionados</button>
-            <span class="admin-status" id="adminStatus"></span>
-          </div>
-          <div id="adminLista" class="history-list">
-            <div class="empty">Cargando registros…</div>
+        <div class="admin-tab-panel oculto" id="admin-panel-mantenimiento" role="tabpanel">
+          <div class="panel admin-work-panel admin-maintenance">
+            <div class="admin-panel-heading"><div><h3>Archivo controlado de registros</h3><p>Solo para registros de prueba o errores documentados; no es una herramienta de eliminación habitual.</p></div><span class="admin-sensitive">Operación sensible</span></div>
+            <div class="admin-warning">Archivar un registro definitivo lo retira del listado operativo y de la consulta pública. Se conserva una copia de sus datos y un evento de auditoría, pero los PDF permanecen bajo custodia fuera de Firebase. Verifica el código antes de continuar.</div>
+            <div class="admin-filter-grid"><div class="admin-filter-field"><label for="adminBuscarRegistro">Buscar certificación</label><input type="search" id="adminBuscarRegistro" placeholder="Código, archivo o certificador" autocomplete="off"></div><div class="admin-filter-actions"><button type="button" id="btnActualizarAdminLista" class="btn-small">Actualizar lista</button></div></div>
+            <div class="admin-list-heading"><div><strong id="adminRegistrosResumen">Certificaciones disponibles</strong><small>Por seguridad solo puedes marcar los registros de la página visible (10 por página).</small></div></div>
+            <div id="adminLista" class="history-list" aria-live="polite"><div class="empty">Abre Mantenimiento para cargar los registros.</div></div>
+            <div class="admin-pagination oculto" id="adminListaPaginacion"><button type="button" class="btn-small" id="btnAdminAnterior">Anterior</button><span id="adminPaginaTexto">Página 1 de 1</span><button type="button" class="btn-small" id="btnAdminSiguiente">Siguiente</button></div>
+            <div class="admin-action-zone">
+              <div class="admin-filter-field"><label for="adminMotivoEliminacion">Motivo documentado del retiro</label><textarea id="adminMotivoEliminacion" rows="3" minlength="10" placeholder="Describa el error y la razón del retiro del registro operativo."></textarea></div>
+              <label class="admin-confirm-label"><input type="checkbox" id="adminConfirmarRetiro"> Confirmo que los registros seleccionados son pruebas o errores identificados y que corresponde su retiro.</label>
+              <div class="admin-toolbar"><button type="button" class="btn-small" id="btnSeleccionarTodosAdmin">Marcar página visible</button><button type="button" class="btn-small" id="btnDeseleccionarTodosAdmin">Quitar selección</button><button type="button" class="btn-danger" id="btnEliminarSeleccionados" disabled>Archivar registros seleccionados</button><span class="admin-status" id="adminStatus" role="status"></span></div>
+            </div>
           </div>
         </div>
       </section>
 
-      
       <section class="page" id="page-seguridad">
         <div class="section-head">
           <h2>Seguridad de la cuenta</h2>

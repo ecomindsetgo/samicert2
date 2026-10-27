@@ -4,7 +4,7 @@ import {
   EmailAuthProvider, reauthenticateWithCredential, updatePassword
 } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, deleteDoc, query, collection, where, limit, getDocs, serverTimestamp, writeBatch
+  getFirestore, doc, getDoc, setDoc, deleteDoc, query, collection, where, limit, orderBy, getDocs, serverTimestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 import { firebaseConfig, ADMIN_UID } from "./firebase-config.js";
 
@@ -13,7 +13,7 @@ const auth = getAuth(appFirebase);
 const db = getFirestore(appFirebase);
 
 
-const APP_VERSION = "3.2.1";
+const APP_VERSION = "3.3.0";
 
 function crearRefAuditoria() {
   return doc(collection(db, "auditoria"));
@@ -2681,75 +2681,132 @@ function fechaRegistroEnMs(r) {
   return 0;
 }
 
-async function cargarHistorialEtapasAdmin() {
-  if (usuarioActual?.uid !== ADMIN_UID) return;
-  const cont = document.querySelector("#page-detalleUsuarios.active #historialDetalleUsuarios");
-  if (!cont) return;
+let detalleDatosCache = null;
+let detalleCargaActiva = null;
+let detallePagina = 1;
 
-  try {
-    const [vbSnap, pendSnap, certSnap] = await Promise.all([
-      getDocs(collection(db,"documentosVB")),
-      getDocs(collection(db,"pendientesFirma")),
-      getDocs(collection(db,"certificaciones"))
-    ]);
-
-    const etapa = $("filtroDetalleEtapa")?.value || "vb";
-    const sets = {
-      vb: {
-        title:"Documentos con Visto Bueno",
-        rows:vbSnap.docs.map(d=>({...d.data(),id:d.id})),
-        user:r=>r.vbNombre||r.vbEmail||"Raúl",
-        file:r=>r.archivoVBNombre||r.archivoOriginal||r.id
-      },
-      procesados: {
-        title:"Documentos procesados por certificador",
-        rows:pendSnap.docs.map(d=>({...d.data(),id:d.id})),
-        user:r=>r.certificadorNombre||r.certificadorEmail||"No indicado",
-        file:r=>r.archivoProvisionalNombre||r.archivoOriginal||r.id
-      },
-      mesa: {
-        title:"Completados — firma de Mesa de Partes",
-        rows:deduplicarHistorialCertificaciones(
-          certSnap.docs.map(d=>({...d.data(),id:d.id}))
-        ),
-        user:r=>r.firmanteNombre||r.firmanteEmail||"Mesa de Partes",
-        file:r=>r.archivoCertificadoNombre||r.archivoOriginal||r.id
-      }
-    };
-
-    const data=sets[etapa];
-    const esc=v=>escapeHtml(v??"");
-    const grupos=new Map();
-
-    for (const r of data.rows) {
-      const usuario=String(data.user(r)||"Sin usuario");
-      if (!grupos.has(usuario)) grupos.set(usuario,[]);
-      grupos.get(usuario).push(r);
-    }
-
-    const bloques=Array.from(grupos.entries()).map(([usuario,rows])=>`
-      <div class="admin-user-group">
-        <div class="admin-user-group-head">
-          <div><strong>${esc(usuario)}</strong><span class="admin-group-user">${esc(data.title)}</span></div>
-          <span class="admin-group-count">${rows.length} registro(s)</span>
-        </div>
-        ${rows.map(r=>`
-          <div class="history-item">
-            <div class="history-id">${esc(data.file(r))}</div>
-            <div class="history-meta">Fecha: ${esc(r.fecha||"")} ${esc(r.hora||"")}</div>
-            <div class="history-meta">Estado: ${esc(r.estado||data.title)}</div>
-          </div>
-        `).join("")}
-      </div>`).join("");
-
-    cont.innerHTML=`
-      <div class="panel">
-        <div class="panel-title">${esc(data.title)} (${data.rows.length})</div>
-        ${bloques || '<div class="empty">No hay documentos registrados en esta etapa.</div>'}
-      </div>`;
-  } catch(e) {
-    cont.innerHTML=`<div class="empty">No se pudo cargar el detalle: ${escapeHtml(e.message||"")}</div>`;
+function fechaISOAdmin(registro) {
+  const ms = fechaRegistroEnMs(registro);
+  if (ms) {
+    const partes = new Intl.DateTimeFormat("en-CA", {timeZone:"America/Lima",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(ms));
+    const dato = tipo => partes.find(p => p.type === tipo)?.value || "";
+    return `${dato("year")}-${dato("month")}-${dato("day")}`;
   }
+  const fecha = String(registro.fecha || "").trim();
+  const dmy = fecha.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  return dmy ? `${dmy[3]}-${dmy[2].padStart(2,"0")}-${dmy[1].padStart(2,"0")}` : "";
+}
+
+function datosEtapaAdmin(etapa) {
+  if (!detalleDatosCache) return {registros:[], titulo:"", usuario:()=>"", archivo:()=>""};
+  const {vb, pendientes, certificados} = detalleDatosCache;
+  if (etapa === "vb") return {
+    titulo:"Visto Bueno", nota:"Registros preparados por el responsable de digitalización.",
+    registros:vb, usuario:r=>r.vbNombre||r.vbEmail||"No indicado",
+    archivo:r=>r.archivoVBNombre||r.archivoOriginal||r.id
+  };
+  if (etapa === "procesados") {
+    const porId = new Map(pendientes.map(r=>[r.id,r]));
+    certificados.forEach(r=>porId.set(r.id,r));
+    return {
+      titulo:"Certificación", nota:"Incluye pendientes de firma y documentos ya registrados como finales. No se duplican códigos.",
+      registros:[...porId.values()], usuario:r=>r.certificadorNombre||r.certificadorEmail||"No indicado",
+      archivo:r=>r.archivoProvisionalNombre||r.archivoCertificadoNombre||r.archivoOriginal||r.id
+    };
+  }
+  return {
+    titulo:"Firma registrada", nota:"PDF firmados por Mesa de Partes y registrados en SAMICERT; no implica validación criptográfica de la firma.",
+    registros:certificados, usuario:r=>r.firmanteNombre||r.firmanteEmail||"Mesa de Partes",
+    archivo:r=>r.archivoCertificadoNombre||r.archivoOriginal||r.id
+  };
+}
+
+function refrescarResponsablesDetalle() {
+  const select = $("detalleUsuario");
+  if (!select) return;
+  const previo = select.value;
+  const etapa = datosEtapaAdmin($("filtroDetalleEtapa").value);
+  const nombres = [...new Set(etapa.registros.map(etapa.usuario).filter(Boolean))]
+    .sort((a,b)=>String(a).localeCompare(String(b),"es"));
+  select.innerHTML = '<option value="">Todos los responsables</option>' +
+    nombres.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+  if (nombres.includes(previo)) select.value = previo;
+}
+
+function renderDetalleUsuarios() {
+  const cont = $("historialDetalleUsuarios");
+  if (!cont || !detalleDatosCache || !esAdministradorActual) return;
+  const datos = datosEtapaAdmin($("filtroDetalleEtapa")?.value || "vb");
+  const buscar = ($("detalleBuscar")?.value||"").trim().toLocaleLowerCase("es");
+  const responsable = $("detalleUsuario")?.value || "";
+  const desde = $("detalleDesde")?.value || "";
+  const hasta = $("detalleHasta")?.value || "";
+  const filtrados = datos.registros.filter(r=>{
+    const usuario = String(datos.usuario(r));
+    const texto = [usuario,datos.archivo(r),r.id,r.archivoOriginal,r.estado].join(" ").toLocaleLowerCase("es");
+    const fecha = fechaISOAdmin(r);
+    return (!buscar || texto.includes(buscar)) && (!responsable || usuario === responsable)
+      && (!desde || (fecha && fecha >= desde)) && (!hasta || (fecha && fecha <= hasta));
+  }).sort((a,b)=>fechaRegistroEnMs(b)-fechaRegistroEnMs(a));
+  const totalPaginas = Math.max(1,Math.ceil(filtrados.length/10));
+  detallePagina = Math.max(1,Math.min(detallePagina,totalPaginas));
+  const inicio = (detallePagina-1)*10;
+  const visibles = filtrados.slice(inicio,inicio+10);
+  $("detalleResumen").textContent = datos.titulo;
+  $("detalleSubtitulo").textContent = datos.nota;
+  $("detalleContador").textContent = `${filtrados.length} de ${datos.registros.length} registros`;
+  if (!filtrados.length) {
+    cont.innerHTML = `<div class="empty">${datos.registros.length ? "No se encontraron documentos con estos filtros." : "No hay documentos registrados en esta etapa."}</div>`;
+  } else {
+    cont.innerHTML = `<div class="admin-table-wrap"><table class="admin-table admin-activity-table">
+      <thead><tr><th>Documento / código</th><th>Responsable</th><th>Fecha</th><th>Estado</th><th>Detalle</th></tr></thead>
+      <tbody>${visibles.map(r=>{
+        const estado = r.estado === "certificado" ? "Firmado y registrado" : ({"pendiente-firma":"Pendiente de firma","pendiente-certificador":"Pendiente de certificación","procesado-certificador":"Procesado","cancelado":"Cancelado","cancelado-certificador":"Cancelado"}[r.estado] || r.estado || "Registrado");
+        const esCancelado = /cancelad/i.test(estado);
+        const paginas = (r.paginasCertificadas||[]).join(", ");
+        const total = r.totalPaginas || "—";
+        const hash = r.sha256Final || r.sha256 || "";
+        return `<tr>
+          <td><div class="admin-doc-name">${escapeHtml(datos.archivo(r))}</div><span class="admin-code">${escapeHtml(r.id)}</span></td>
+          <td>${escapeHtml(datos.usuario(r))}</td>
+          <td class="admin-date-cell">${escapeHtml(formatoFechaRegistro(r) || "—")}</td>
+          <td><span class="admin-state ${esCancelado ? "is-cancelled" : (r.estado === "certificado" ? "is-done" : "")}">${escapeHtml(estado)}</span></td>
+          <td><details class="admin-row-details"><summary>Ver</summary><div><strong>Archivo de origen:</strong> ${escapeHtml(r.archivoOriginal||"—")}<br><strong>Páginas seleccionadas:</strong> ${escapeHtml(paginas||"—")}<br><strong>Total de páginas:</strong> ${escapeHtml(total)}${hash ? `<br><strong>SHA-256 registrado:</strong><span class="admin-hash">${escapeHtml(hash)}</span>` : ""}</div></details></td>
+        </tr>`;
+      }).join("")}</tbody></table></div>`;
+  }
+  $("detallePaginacion").classList.toggle("oculto",filtrados.length<=10);
+  $("detallePaginaTexto").textContent=`Página ${detallePagina} de ${totalPaginas}`;
+  $("btnDetalleAnterior").disabled=detallePagina===1;
+  $("btnDetalleSiguiente").disabled=detallePagina===totalPaginas;
+}
+
+async function cargarHistorialEtapasAdmin(forzar = false) {
+  if (!esAdministradorActual || !document.querySelector("#page-detalleUsuarios.active #historialDetalleUsuarios")) return;
+  if (!detalleDatosCache || forzar) {
+    if (!detalleCargaActiva) {
+      $("historialDetalleUsuarios").innerHTML='<div class="empty">Consultando registros…</div>';
+      detalleCargaActiva = Promise.all([
+        getDocs(collection(db,"documentosVB")),
+        getDocs(collection(db,"pendientesFirma")),
+        getDocs(collection(db,"certificaciones"))
+      ]).then(([vb,pend,cert])=>({
+        vb:vb.docs.map(d=>({...d.data(),id:d.id})),
+        pendientes:pend.docs.map(d=>({...d.data(),id:d.id})),
+        certificados:deduplicarHistorialCertificaciones(cert.docs.map(d=>({...d.data(),id:d.id})))
+      }));
+    }
+    try { detalleDatosCache = await detalleCargaActiva; }
+    catch(e) {
+      $("historialDetalleUsuarios").innerHTML=`<div class="empty">No se pudo cargar el detalle: ${escapeHtml(e.message||"")}</div>`;
+      return;
+    } finally { detalleCargaActiva = null; }
+  }
+  $("detalleKpiVB").textContent=detalleDatosCache.vb.length;
+  $("detalleKpiCert").textContent=datosEtapaAdmin("procesados").registros.length;
+  $("detalleKpiMesa").textContent=detalleDatosCache.certificados.length;
+  refrescarResponsablesDetalle();
+  renderDetalleUsuarios();
 }
 
 async function gestionarRegistroVB(id, accion) {
@@ -2865,7 +2922,6 @@ async function cargarHistorial() {
   $("historialPaginacion").classList.add("oculto");
 
   try {
-    await cargarHistorialEtapasAdmin();
     const snap = await getDocs(collection(db,"certificaciones"));
     const todos = snap.docs.map(d => ({...d.data(), id:d.id}));
     historialRegistros = deduplicarHistorialCertificaciones(todos);
@@ -3063,127 +3119,158 @@ function archivoAdmin(r) {
     r.archivoOriginal || "Documento PDF";
 }
 
-async function cargarAdministracion() {
-  if (!esAdministradorActual) return;
+let adminRegistrosCache = null;
+let adminPagina = 1;
+let adminBitacoraCache = [];
+let adminBitacoraPagina = 1;
+let adminMantenimientoCargado = false;
+
+async function cargarResumenAdmin(forzar = false) {
+  if (!esAdministradorActual) return [];
+  if (!adminRegistrosCache || forzar) {
+    const snap = await getDocs(collection(db,"certificaciones"));
+    adminRegistrosCache = deduplicarHistorialCertificaciones(snap.docs.map(d=>({...d.data(),id:d.id,coleccion:"certificaciones"})))
+      .sort((a,b)=>fechaRegistroEnMs(b)-fechaRegistroEnMs(a));
+  }
+  const registros = adminRegistrosCache;
+  $("adminKpiCert").textContent = registros.length;
+  $("adminKpiRecert").textContent = registros.filter(r=>r.esRecertificacion===true).length;
+  const fechaUltima = registros.length ? fechaISOAdmin(registros[0]) : "";
+  $("adminKpiUltima").textContent = fechaUltima ? `${fechaUltima.slice(8,10)}/${fechaUltima.slice(5,7)}/${fechaUltima.slice(0,4)}` : "Sin registros";
+  return registros;
+}
+
+function renderAdministracionRegistros() {
   const contenedor = $("adminLista");
-  const estado = $("adminStatus");
-  contenedor.innerHTML = '<div class="empty">Cargando registros…</div>';
-  estado.textContent = "";
+  if (!contenedor || !adminRegistrosCache) return;
+  const buscar = ($("adminBuscarRegistro")?.value || "").trim().toLocaleLowerCase("es");
+  const filtrados = adminRegistrosCache.filter(r=>[
+    r.id,archivoAdmin(r),r.archivoOriginal,r.certificadorNombre,r.certificadorEmail,r.firmanteNombre
+  ].join(" ").toLocaleLowerCase("es").includes(buscar));
+  const paginas = Math.max(1,Math.ceil(filtrados.length/10));
+  adminPagina = Math.min(Math.max(1,adminPagina),paginas);
+  const visibles = filtrados.slice((adminPagina-1)*10,adminPagina*10);
+  $("adminRegistrosResumen").textContent = `${filtrados.length} de ${adminRegistrosCache.length} certificaciones`;
+  contenedor.innerHTML = visibles.length ? `<div class="admin-table-wrap"><table class="admin-table admin-activity-table"><thead><tr><th><span class="sr-only">Marcar</span></th><th>Identificación / archivo</th><th>Certificador</th><th>Registro</th></tr></thead><tbody>
+    ${visibles.map(r=>`<tr><td><input class="admin-check" type="checkbox" aria-label="Marcar registro ${escapeHtml(r.id)}" value="certificaciones|${escapeHtml(r.id)}"></td><td><div class="admin-doc-name">${escapeHtml(archivoAdmin(r))}</div><span class="admin-code">${escapeHtml(r.id)}</span></td><td>${escapeHtml(r.certificadorNombre||r.certificadorEmail||"No indicado")}</td><td class="admin-date-cell">${escapeHtml(formatoFechaRegistro(r)||"—")}</td></tr>`).join("")}</tbody></table></div>`
+    : '<div class="empty">No hay certificaciones que coincidan con esta búsqueda.</div>';
+  contenedor.querySelectorAll(".admin-check").forEach(c=>c.addEventListener("change",actualizarBotonEliminarAdmin));
+  $("adminListaPaginacion").classList.toggle("oculto",filtrados.length<=10);
+  $("adminPaginaTexto").textContent=`Página ${adminPagina} de ${paginas}`;
+  $("btnAdminAnterior").disabled=adminPagina<=1;
+  $("btnAdminSiguiente").disabled=adminPagina>=paginas;
+  $("adminConfirmarRetiro").checked = false;
+  actualizarBotonEliminarAdmin();
+}
 
+async function cargarAdministracion(forzar = false) {
+  if (!esAdministradorActual) return;
+  const estado=$("adminStatus");
+  $("adminLista").innerHTML='<div class="empty">Consultando certificaciones…</div>';
   try {
-    const snap = await getDocs(collection(db, "certificaciones"));
-    const registros = deduplicarHistorialCertificaciones(
-      snap.docs.map(d => ({...d.data(), id:d.id, coleccion:"certificaciones"}))
-    ).sort((a,b) => fechaRegistroEnMs(b) - fechaRegistroEnMs(a));
-
-    if (!registros.length) {
-      contenedor.innerHTML = '<div class="empty">No hay certificaciones registradas para administrar.</div>';
-      actualizarBotonEliminarAdmin();
-      estado.textContent = "0 registro(s)";
-      return;
-    }
-
-    const grupos = new Map();
-    for (const r of registros) {
-      const usuario = r.certificadorNombre || r.certificadorEmail || r.firmanteNombre || r.firmanteEmail || "No indicado";
-      if (!grupos.has(usuario)) grupos.set(usuario, []);
-      grupos.get(usuario).push(r);
-    }
-
-    const gruposHtml = Array.from(grupos.entries()).map(([usuario, rows]) => `
-      <div class="admin-user-group">
-        <div class="admin-user-group-head">
-          <div><strong>${escapeHtml(usuario)}</strong><span class="admin-group-user">Certificador</span></div>
-          <span class="admin-group-count">${rows.length} registro(s)</span>
-        </div>
-        <div style="overflow:auto">
-          <table class="admin-table">
-            <thead><tr>
-              <th></th><th>ID</th><th>ARCHIVO</th><th>FECHA</th><th>CERTIFICADOR</th>
-            </tr></thead>
-            <tbody>
-              ${rows.map(r => `
-                <tr>
-                  <td><input class="admin-check" type="checkbox" value="certificaciones|${escapeHtml(r.id)}"></td>
-                  <td><small>${escapeHtml(r.id)}</small></td>
-                  <td>
-                    ${escapeHtml(archivoAdmin(r))}<br>
-                    <span style="color:#64748b">${escapeHtml((r.paginasCertificadas || []).length)} página(s)</span>
-                  </td>
-                  <td>${escapeHtml(formatoFechaRegistro(r))}</td>
-                  <td>${escapeHtml(usuario)}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        </div>
-      </div>`).join("");
-
-    contenedor.innerHTML = `
-      <div class="admin-list-note"><strong>${registros.length} registro(s)</strong></div>
-      ${gruposHtml}`;
-
-    contenedor.querySelectorAll(".admin-check").forEach(c =>
-      c.addEventListener("change", actualizarBotonEliminarAdmin)
-    );
-    actualizarBotonEliminarAdmin();
-    estado.textContent = `${registros.length} registro(s)`;
-  } catch (err) {
+    await cargarResumenAdmin(forzar);
+    adminMantenimientoCargado = true;
+    renderAdministracionRegistros();
+  } catch(err) {
     console.error(err);
-    contenedor.innerHTML =
-      `<div class="empty">No se pudo cargar la administración: ${escapeHtml(err.message || "")}</div>`;
+    $("adminLista").innerHTML=`<div class="empty">No se pudieron cargar los registros: ${escapeHtml(err.message||"")}</div>`;
+    if (estado) estado.textContent="No se pudieron consultar los registros.";
   }
 }
 
 function obtenerSeleccionAdmin() {
-  return [...document.querySelectorAll(".admin-check:checked")].map(c => c.value);
+  return [...document.querySelectorAll("#adminLista .admin-check:checked")].map(c=>c.value);
 }
 
 function actualizarBotonEliminarAdmin() {
-  const btn = $("btnEliminarSeleccionados");
-  if (btn) btn.disabled = !esAdministradorActual || obtenerSeleccionAdmin().length === 0;
+  const ids=obtenerSeleccionAdmin();
+  const motivo=($("adminMotivoEliminacion")?.value||"").trim();
+  const aceptado=$("adminConfirmarRetiro")?.checked===true;
+  const btn=$("btnEliminarSeleccionados");
+  if (btn) btn.disabled=!esAdministradorActual || !ids.length || ids.length>10 || motivo.length<10 || !aceptado;
+  const status=$("adminStatus");
+  if (status && ids.length) status.textContent=`${ids.length} registro(s) seleccionado(s).`;
+  else if (status) status.textContent="";
 }
 
 function seleccionarTodosAdmin(valor) {
-  document.querySelectorAll(".admin-check").forEach(c => c.checked = valor);
+  document.querySelectorAll("#adminLista .admin-check").forEach(c=>c.checked=valor);
   actualizarBotonEliminarAdmin();
 }
 
 function formatearFechaAuditoria(r) {
   const ts = r.creadoEn?.seconds ? new Date(r.creadoEn.seconds * 1000) : null;
   if (!ts) return "Fecha no disponible";
-  return new Intl.DateTimeFormat("es-PE", { timeZone:"America/Lima", dateStyle:"short", timeStyle:"medium" }).format(ts);
+  return new Intl.DateTimeFormat("es-PE",{timeZone:"America/Lima",dateStyle:"short",timeStyle:"short"}).format(ts);
+}
+
+function etiquetaEventoAuditoria(tipo) {
+  return ({
+    VISTO_BUENO_REGISTRADO:"Visto Bueno registrado",
+    VISTO_BUENO_CANCELADO:"Visto Bueno cancelado",
+    DOCUMENTO_ENVIADO_A_FIRMA:"Enviado a firma",
+    PENDIENTE_CANCELADO:"Firma pendiente cancelada",
+    CERTIFICACION_FINAL_REGISTRADA:"Certificación final registrada",
+    INDICE_PUBLICO_SINCRONIZADO:"Consulta pública sincronizada",
+    REGISTRO_ARCHIVADO_Y_RETIRADO:"Registro archivado"
+  })[tipo] || String(tipo || "Actividad registrada").replaceAll("_"," ").toLocaleLowerCase("es");
+}
+
+function renderAuditoriaAdmin() {
+  const contenedor=$("auditoriaLista");
+  if (!contenedor) return;
+  const buscar=($("auditoriaBuscar")?.value||"").trim().toLocaleLowerCase("es");
+  const tipo=$("auditoriaTipo")?.value || "";
+  const filtrados=adminBitacoraCache.filter(r=>{
+    const texto=[r.tipo,r.actorNombre,r.actorEmail,r.entidad,r.entidadId,etiquetaEventoAuditoria(r.tipo)].join(" ").toLocaleLowerCase("es");
+    return (!tipo || r.tipo===tipo) && (!buscar || texto.includes(buscar));
+  });
+  const paginas=Math.max(1,Math.ceil(filtrados.length/10));
+  adminBitacoraPagina=Math.min(Math.max(1,adminBitacoraPagina),paginas);
+  const visibles=filtrados.slice((adminBitacoraPagina-1)*10,adminBitacoraPagina*10);
+  $("auditoriaResumen").textContent=`${filtrados.length} evento(s) de los ${adminBitacoraCache.length} más recientes consultados`;
+  contenedor.innerHTML=visibles.length ? visibles.map(r=>{
+    const detalle=r.detalle && typeof r.detalle==="object" ? Object.entries(r.detalle).map(([clave,valor])=>
+      `<div><strong>${escapeHtml(clave)}:</strong> <span class="admin-audit-value">${escapeHtml(Array.isArray(valor)?valor.join(", "):typeof valor==="object"?JSON.stringify(valor):String(valor??""))}</span></div>`
+    ).join("") : "";
+    return `<article class="audit-item"><div class="audit-item-main"><div class="audit-type">${escapeHtml(etiquetaEventoAuditoria(r.tipo))}</div><div class="audit-detail">${escapeHtml(r.actorNombre||r.actorEmail||"Usuario autorizado")}<span class="admin-muted-sep">·</span>${escapeHtml(r.entidadId||r.entidad||"Sistema")}</div></div><div class="audit-date">${escapeHtml(formatearFechaAuditoria(r))}</div>${detalle?`<details class="admin-audit-extra"><summary>Ver datos técnicos</summary><div>${detalle}</div></details>`:""}</article>`;
+  }).join("") : '<div class="empty">No hay eventos con estos criterios.</div>';
+  $("auditoriaPaginacion").classList.toggle("oculto",filtrados.length<=10);
+  $("auditoriaPaginaTexto").textContent=`Página ${adminBitacoraPagina} de ${paginas}`;
+  $("btnAuditoriaAnterior").disabled=adminBitacoraPagina===1;
+  $("btnAuditoriaSiguiente").disabled=adminBitacoraPagina>=paginas;
 }
 
 async function cargarAuditoriaAdmin() {
   if (!esAdministradorActual) return;
-  const contenedor = $("auditoriaLista");
+  const contenedor=$("auditoriaLista");
   if (!contenedor) return;
-  contenedor.innerHTML = '<div class="empty">Cargando bitácora…</div>';
+  contenedor.innerHTML='<div class="empty">Consultando bitácora…</div>';
   try {
-    const snap = await getDocs(collection(db, "auditoria"));
-    const registros = snap.docs
-      .map(d => ({ ...d.data(), id:d.id }))
-      .sort((a,b) => (b.creadoEn?.seconds || 0) - (a.creadoEn?.seconds || 0))
-      .slice(0, 100);
-    if (!registros.length) {
-      contenedor.innerHTML = '<div class="empty">Aún no hay eventos de auditoría registrados.</div>';
-      return;
-    }
-    contenedor.innerHTML = registros.map(r => {
-      const detalle = r.detalle && typeof r.detalle === "object"
-        ? Object.entries(r.detalle).map(([k,v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : String(v ?? "")}`).join(" · ")
-        : "";
-      return `<div class="audit-item">
-        <div><div class="audit-type">${escapeHtml(r.tipo || "EVENTO")}</div><div class="history-meta">${escapeHtml(r.actorNombre || r.actorEmail || "Usuario")}</div></div>
-        <div class="audit-detail"><strong>${escapeHtml(r.entidad || "")}</strong> · ${escapeHtml(r.entidadId || "")}${detalle ? `<br>${escapeHtml(detalle)}` : ""}</div>
-        <div class="audit-date">${escapeHtml(formatearFechaAuditoria(r))}</div>
-      </div>`;
-    }).join("");
-  } catch (err) {
+    const snap=await getDocs(query(collection(db,"auditoria"),orderBy("creadoEn","desc"),limit(200)));
+    adminBitacoraCache=snap.docs.map(d=>({...d.data(),id:d.id}));
+    const tipos=[...new Set(adminBitacoraCache.map(r=>r.tipo).filter(Boolean))].sort();
+    const sel=$("auditoriaTipo");
+    const previo=sel.value;
+    sel.innerHTML='<option value="">Todas las acciones</option>'+tipos.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(etiquetaEventoAuditoria(t))}</option>`).join("");
+    if (tipos.includes(previo)) sel.value=previo;
+    adminBitacoraPagina=1;
+    renderAuditoriaAdmin();
+  } catch(err) {
     console.error(err);
-    contenedor.innerHTML = `<div class="empty">No se pudo cargar la bitácora: ${escapeHtml(err.message || "")}</div>`;
+    contenedor.innerHTML=`<div class="empty">No se pudo cargar la bitácora: ${escapeHtml(err.message||"")}</div>`;
   }
+}
+
+function mostrarTabAdministracion(nombre) {
+  document.querySelectorAll(".admin-tab").forEach(btn=>{
+    const activo=btn.dataset.adminTab===nombre;
+    btn.classList.toggle("is-active",activo);
+    btn.setAttribute("aria-selected",String(activo));
+  });
+  document.querySelectorAll(".admin-tab-panel").forEach(panel=>
+    panel.classList.toggle("oculto",panel.id!==`admin-panel-${nombre}`));
+  if (nombre==="mantenimiento" && !adminMantenimientoCargado) cargarAdministracion();
 }
 
 async function sincronizarCertificacionesPublicas() {
@@ -3259,7 +3346,7 @@ async function crearBackupAdmin() {
 async function eliminarSeleccionadosAdmin() {
   if (!esAdministradorActual) return;
   const ids = obtenerSeleccionAdmin();
-  if (!ids.length) return;
+  if (!ids.length || ids.length > 10 || $("adminConfirmarRetiro")?.checked !== true) return;
   const motivo = ($("adminMotivoEliminacion")?.value || "").trim();
   if (motivo.length < 10) {
     alert("Ingrese un motivo de retiro de al menos 10 caracteres.");
@@ -3309,13 +3396,15 @@ async function eliminarSeleccionadosAdmin() {
     }
     estado.textContent = `Se archivaron y retiraron ${completados} registro(s) con trazabilidad.`;
     if ($("adminMotivoEliminacion")) $("adminMotivoEliminacion").value = "";
-    await cargarAdministracion();
+    $("adminConfirmarRetiro").checked = false;
+    detalleDatosCache = null;
+    await cargarAdministracion(true);
     await cargarHistorial();
     await cargarAuditoriaAdmin();
   } catch (err) {
     console.error(err);
     estado.textContent = `No se pudo completar la operación: ${err.message || ""}`;
-    await cargarAdministracion();
+    await cargarAdministracion(true);
   }
 }
 
@@ -3331,7 +3420,7 @@ function mostrarPagina(nombre) {
 
   if (nombre === "historial") cargarHistorial();
   if (nombre === "detalleUsuarios") cargarHistorialEtapasAdmin();
-  if (nombre === "administracion") { cargarAdministracion(); cargarAuditoriaAdmin(); }
+  if (nombre === "administracion") { cargarResumenAdmin().catch(e => console.error(e)); cargarAuditoriaAdmin(); }
   if (nombre === "vistoBueno") {
     if (!selloVBBytes) actualizarControlSello("vb", false);
     cargarBandejaVB();
@@ -3643,4 +3732,22 @@ onAuthStateChanged(auth,async user => {
 renderLista();
 
 
-$("filtroDetalleEtapa")?.addEventListener("change", () => cargarHistorialEtapasAdmin());
+$("filtroDetalleEtapa")?.addEventListener("change", () => { detallePagina=1; $("detalleUsuario").value=""; refrescarResponsablesDetalle(); renderDetalleUsuarios(); });
+["detalleBuscar","detalleUsuario","detalleDesde","detalleHasta"].forEach(id=>$(id)?.addEventListener(id==="detalleBuscar"?"input":"change",()=>{ detallePagina=1;renderDetalleUsuarios(); }));
+$("btnLimpiarDetalle")?.addEventListener("click",()=>{ ["detalleBuscar","detalleDesde","detalleHasta"].forEach(id=>$(id).value=""); $("detalleUsuario").value="";detallePagina=1;renderDetalleUsuarios(); });
+$("btnActualizarDetalle")?.addEventListener("click",()=>cargarHistorialEtapasAdmin(true));
+$("btnDetalleAnterior")?.addEventListener("click",()=>{detallePagina--;renderDetalleUsuarios();});
+$("btnDetalleSiguiente")?.addEventListener("click",()=>{detallePagina++;renderDetalleUsuarios();});
+
+document.querySelectorAll(".admin-tab").forEach(btn=>btn.addEventListener("click",()=>mostrarTabAdministracion(btn.dataset.adminTab)));
+$("adminBuscarRegistro")?.addEventListener("input",()=>{adminPagina=1;renderAdministracionRegistros();});
+$("btnActualizarAdminLista")?.addEventListener("click",()=>cargarAdministracion(true));
+$("btnAdminAnterior")?.addEventListener("click",()=>{adminPagina--;renderAdministracionRegistros();});
+$("btnAdminSiguiente")?.addEventListener("click",()=>{adminPagina++;renderAdministracionRegistros();});
+$("adminMotivoEliminacion")?.addEventListener("input",actualizarBotonEliminarAdmin);
+$("adminConfirmarRetiro")?.addEventListener("change",actualizarBotonEliminarAdmin);
+$("auditoriaBuscar")?.addEventListener("input",()=>{adminBitacoraPagina=1;renderAuditoriaAdmin();});
+$("auditoriaTipo")?.addEventListener("change",()=>{adminBitacoraPagina=1;renderAuditoriaAdmin();});
+$("btnLimpiarAuditoria")?.addEventListener("click",()=>{$("auditoriaBuscar").value="";$("auditoriaTipo").value="";adminBitacoraPagina=1;renderAuditoriaAdmin();});
+$("btnAuditoriaAnterior")?.addEventListener("click",()=>{adminBitacoraPagina--;renderAuditoriaAdmin();});
+$("btnAuditoriaSiguiente")?.addEventListener("click",()=>{adminBitacoraPagina++;renderAuditoriaAdmin();});
