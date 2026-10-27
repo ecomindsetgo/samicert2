@@ -13,7 +13,7 @@ const auth = getAuth(appFirebase);
 const db = getFirestore(appFirebase);
 
 
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.2.1";
 
 function crearRefAuditoria() {
   return doc(collection(db, "auditoria"));
@@ -142,9 +142,11 @@ if (window.pdfjsLib) {
 
 
 const MESA_PARTES_EMAIL = "archivocsjsanta@pj.gob.pe";
+let mesaPartesUidReconocido = null;
 
 function esUsuarioMesaPartes(user = usuarioActual) {
-  return !!user && user.emailVerified === true && (user.email || "").toLowerCase() === MESA_PARTES_EMAIL;
+  return !!user && (user.email || "").toLowerCase() === MESA_PARTES_EMAIL
+    && (user.emailVerified === true || user.uid === mesaPartesUidReconocido);
 }
 
 const VISTO_BUENO_UID = "nTTcQeP0Z1Q7hh5YTKQyuvpgvS62";
@@ -1220,6 +1222,7 @@ btnAplicarVB?.addEventListener("click", guardarDocumentoVB);
 btnLimpiarVB?.addEventListener("click", limpiarVistoBueno);
 
 function resetearEstadoSesion() {
+  mesaPartesUidReconocido = null;
   cerrarVistaAmpliada();
   if (resultadoBlob) {
     try { URL.revokeObjectURL(resultadoBlob); } catch (_) {}
@@ -3586,6 +3589,7 @@ btnCerrarSesion.addEventListener("click", async () => {
 
 onAuthStateChanged(auth,async user => {
   usuarioActual = user;
+  mesaPartesUidReconocido = null;
 
   if (!user) {
     resetearEstadoSesion();
@@ -3596,7 +3600,13 @@ onAuthStateChanged(auth,async user => {
 
   try {
     if ((user.email || "").toLowerCase() === MESA_PARTES_EMAIL && user.emailVerified !== true) {
-      throw new Error("La cuenta de Mesa de Partes debe verificar su correo electrónico en Firebase Authentication antes de ingresar.");
+      const snapMesa = await getDoc(doc(db, "usuarios", user.uid));
+      const perfilMesa = snapMesa.exists() ? snapMesa.data() : null;
+      if (!perfilMesa || perfilMesa.uid !== user.uid || perfilMesa.rol !== "mesa_partes"
+        || (perfilMesa.correo || "").toLowerCase() !== MESA_PARTES_EMAIL) {
+        throw new Error("La cuenta de Mesa de Partes no tiene un perfil institucional previamente autorizado. Solicite al administrador revisar su registro en Firebase Authentication y Firestore.");
+      }
+      mesaPartesUidReconocido = user.uid;
     }
     await cargarPerfil(user);
     prepararSelectorSelloCertificador();
